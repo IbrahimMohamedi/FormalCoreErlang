@@ -3,6 +3,10 @@ theory Core_Erlang_Syntax
 begin
 
 
+
+(*Core Erlang Lexical Definitions*)
+
+
 datatype sign = Plus | Minus
 
 datatype digit = Zero | One | Two | Three | Four | Five | Six | Seven | Eight | Nine
@@ -25,15 +29,6 @@ datatype lowercase = a | b | c | d | e | f | g | h | i | j | k | l | m |
 					           u00fe | u00ff
 
 
-(**comment
-
-value"CHR 15"
-value "hd ''foobar''"
-typ int
-value"string_of_type 1"
-value "type_of Plus::string"
- **)
-
 definition valid_inputchar :: "char \<Rightarrow> bool"
   where
     "valid_inputchar ch \<equiv>
@@ -42,14 +37,10 @@ definition valid_inputchar :: "char \<Rightarrow> bool"
 
 datatype inputchar = InputChar char
 
-(**datatype inputchar = InputChar (character: char) where
-"valid_inputchar character""**)
-
 
 datatype control = u0000 | u0001 | u0002 | u0003 | u0004 | u0005 | u0006 | u0007 | u0008 | u0009 | u000a | 
                    u000b | u000c | u000d | u000e | u000f | u0010 | u0011 | u0012 | u0013 | u0014 | u0015 | 
 				            u0016 | u0017 | u0018 | u0019 | u001a | u001b | u001c | u001d | u001e | u001f
-
 
 datatype space = u0020 
 datatype backslash = u005d
@@ -77,88 +68,33 @@ datatype escapechar = B | D | E | F | N | R | S | T | V | BackSlash | SingleQuot
 datatype escape =  EscapeOctal  octal | EscapeCtrlChar  ctrlchar | EscapeChar  escapechar
 
 
+
+(*Xore Erlang Terminals*)
 datatype 'a nonemptylist = Nonemptylist 'a "'a list"
 
 datatype integer = Integer "sign option" "digit nonemptylist"
 
-(**)
 value "Integer None (Nonemptylist Eight [])"
-
-
-
-datatype dot = Dot
-
-(*
-value "(of_char (CHR ''a'') :: nat)"
-
-value "((CHR 0x001f))"
-
-value "typ_of Dot"
-
-value "typeof (c)"
-value "typeof (5::nat)"
-
-
-value "typeof (5::nat)"
-*)
-
 
 datatype exponent_part = Exponent_part   "sign option" "digit nonemptylist"
 
-datatype float = Float  "sign option" "digit nonemptylist " dot  "digit nonemptylist " "exponent_part option"
-
-(*
-definition is_escape :: "char list \<Rightarrow> bool" where
-        "is_escape chars \<equiv> 
-      (\<not> List.null chars )\<and>
-      (hd chars =  CHR 0x5d) \<and>
-     ( (is_octal last chars) \<or> (is_ctrlchar last chars) \<or> (is_escapechar last chars))"
-*)
-
-definition is_control_char :: "char \<Rightarrow> bool" where
-  "is_control_char ch \<equiv> ((of_char (CHR 0x00):: nat) \<le> (of_char ch :: nat)) \<and>
-                    ((of_char ch :: nat) \<le> (of_char (CHR 0x1f):: nat))"
-
-value "is_control_char CHR ''k'' "
-
-definition valid_atom :: " char list \<Rightarrow> bool"
-  where
-    "valid_atom chars \<equiv>
-      \<not> List.null chars \<and>
-      hd chars =  CHR 0x27 \<and>
-      last chars = CHR 0x27 \<and>
-      (\<forall>c\<in>set (tl (butlast chars)).
-        (\<not> is_control_char c) \<and> (\<not> c = CHR 0x27))"
-
-(*
-definition valid_char :: " inputchar  \<Rightarrow> bool"
-  where
-    "valid_atom c \<equiv>
-     ( (c=  CHR 0x24) \<and> (\<not> is_control_char c) \<and> (\<not> c = CHR 0x20)  (\<not> c = CHR 0x5c)) \<or> (is_escape c) "
-value "valid_atom [CHR 0x27,CHR ''A'',CHR 0x27] "
-*)
+datatype float = Float  "sign option" "digit nonemptylist "  "digit nonemptylist " "exponent_part option"
 
 datatype atom = Atom  "inputchar list" | EscapeAtom "escape list"
- (*where
-    "valid_atom (chars::inputchar list) "
-*)
 
 datatype erlang_char = Char  inputchar | Escapechar  escape
- (* where
-    "valid_char characters "
-*)
-
-(* Space needs to be added
-Char:
-$ ((inputchar except control and space and \ ) | escape)*)
 
 datatype erlang_string = String  "erlang_char list"
 
 
 datatype variable_name = UpperCharVar uppercase "namechar list"| UnderScoreVar "namechar nonemptylist"
 
-  datatype variable = VarName string
-    | VarNameList "variable_name list"
+
+
+
+(*Core Erlang Non-Terminals*)
+
+
 
 datatype nil = Nil
 
@@ -177,15 +113,21 @@ and annotated_function_name = FunctionName function_name | AnnotatedFunctionName
 
 and annotated_fun = Function func | AnnotatedFun  func " const list"
 
+and  variables = Variables annotated_variable_name
+            | VariablesList "annotated_variable_name list"
+
+and annotated_variable_name = AnnotatedVarName variable_name | AnnotatedVarNameWithConst variable_name " const list"
+
 and  const = ConstAtom  atomic_literal |ConstList "const nonemptylist" |ConstTuple const tuple | ConstListWithTail "const nonemptylist" const
 
-and pattern = AtomicLit atomic_literal
-             | TuplePat "pattern list"
-             | ListPat "pattern list"
-             | BitstringPat hash "bitstring_pattern list" hash
-             |  ListPatWithTail "pattern list" pattern
+and annotated_pattern = AnnotatedVarPattern annotated_variable_name | AnnotatedPatern pattern |  AnnotatedPaternWithConst pattern "const list"
 
-and bitstring_pattern = BitstringPat hash pattern "expression list"
+and pattern = AtomicLitPat atomic_literal
+             | TuplePat "annotated_pattern list"
+             | ListPat "annotated_pattern list"
+             | BitstringPat  "annotated_pattern list" 
+             |  ListPatWithTail "annotated_pattern list" pattern
+
 
 and expression = ValueListExp annotated_value_list| SingleExp annotated_single_expression
 
@@ -217,11 +159,11 @@ and tuple = Tuple "expression list"
 
 and expr_list = List "expression nonemptylist"
          | ListWithTail "expression nonemptylist" expression
-and binary = Binary hash "bit_string list" hash
+and binary = Binary  "bit_string list" 
 
-and bit_string = BitString hash expression "expression list" hash
+and bit_string = BitString  expression "expression list" 
 
-and Let = LetE "variable list" expression expression
+and Let = LetE variables expression expression
 
 and Case = ECase expression "annotated_clause list"
 
@@ -234,7 +176,7 @@ and patterns = Patterns pattern | PatternsList "pattern list"
 
 and guard = When expression
 
-and func = Fun "variable list" expression
+and func = Fun "annotated_variable_name list" expression
 
 and letrec = Letrec "function_definition list" expression
 
@@ -244,7 +186,7 @@ and inter_module_call = call  expression expression  "expression list"
 
 and prim_op_call = primop string atom  "expression list"
 
-and Try = ETry expression "variable list" expression "variable list" expression
+and Try = ETry expression variables expression variables expression
 
 and receive = Receive "annotated_clause list" timeout
 
@@ -257,9 +199,7 @@ and catch = Catch expression
 (*                      ----------------------------------------                  *)
 
 
-datatype annotated_pattern = AnnotatedVariable annotated_variable
-                        | AnnotatedPat pattern
-                        | AnnotatedPattern pattern "const list" 
+datatype bitstring_pattern = BitstringPatern  annotated_pattern "expression list"
 
 datatype annotated_module = AModule module  | AnnotatedModule  module  "const list"
 
