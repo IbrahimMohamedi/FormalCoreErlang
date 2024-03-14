@@ -1,5 +1,4 @@
-theory Core_Erlang_Test
-
+theory Core_Erlang_Syntax
   imports Main
 begin
 
@@ -70,7 +69,7 @@ datatype escape =  EscapeOctal  octal | EscapeCtrlChar  ctrlchar | EscapeChar  e
 
 
 
-(*Core Erlang Terminals*)
+(*Xore Erlang Terminals*)
 datatype 'a nonemptylist = Nonemptylist 'a "'a list"
 
 datatype integer = Integer "sign option" "digit nonemptylist"
@@ -108,17 +107,19 @@ datatype nil = Nil
 
 datatype  const = ConstAtom  atomic_literal |ConstList "const nonemptylist" |ConstTuple "const list" | ConstListWithTail "const nonemptylist" const
 
-datatype annotated_variable_name = AnnotatedVarName variable_name | AnnotatedVarNameWithConst variable_name " const list"
-
-
 datatype  variables = Variables annotated_variable_name
             | VariablesList "annotated_variable_name list"
+
+datatype annotated_variable_name = AnnotatedVarName variable_name | AnnotatedVarNameWithConst variable_name " const list"
 
 
 datatype function_name = FunctionName  atom  integer
 
 
-datatype annotated_pattern = AnnotatedVarPattern annotated_variable_name | AnnotatedPatern pattern |  AnnotatedPaternWithConst pattern "const list"
+datatype func = Fun "annotated_variable_name list" expression
+
+and annotated_pattern = AnnotatedVarPattern annotated_variable_name | AnnotatedPatern pattern |  AnnotatedPaternWithConst pattern "const list"
+
 and pattern = AtomicLitPat atomic_literal
              | TuplePat "annotated_pattern list"
              | ListPat "annotated_pattern list"
@@ -126,19 +127,12 @@ and pattern = AtomicLitPat atomic_literal
              |  ListPatWithTail "annotated_pattern list" pattern
 
 
-datatype patterns = Patterns pattern | PatternsList "pattern list"
+and expression = ValueListExp annotated_value_list| SingleExp annotated_single_expression
 
-datatype annotated_function_name = FunctionName function_name | AnnotatedFunctionName function_name "const list"
+and annotated_value_list =  AnnValueList value_list | AnnotatedValueList value_list "const list"
 
-datatype 'a annotated = Annotated 'a "const list" | Unannotated 'a
-
-datatype function_definition = FunctionDefinition  "function_name annotated"  "func annotated"
-
-and func = Fun "annotated_variable_name list" expression
-
-
-and expression = ValueListExp "value_list annotated"| SingleExp "single_expression annotated"
-
+and annotated_single_expression = AnnotatedExpr single_expression
+                                  | AnnotatedExprWithConstants single_expression "const list"
 
 and single_expression = AtomicLitExpr atomic_literal
                       | VarNameExpr variable_name
@@ -157,15 +151,13 @@ and single_expression = AtomicLitExpr atomic_literal
                       | ReceiveExpr receive
                       | SequencingExpr sequencing
                       | CatchExpr catch
-
-and value_list = ValueList " single_expression annotated list"
+and value_list = ValueList "annotated_single_expression list"
 
 
 and tuple = Tuple "expression list"
 
 and expr_list = List "expression nonemptylist"
-				| ListWithTail "expression nonemptylist" expression
-
+         | ListWithTail "expression nonemptylist" expression
 and binary = Binary  "bit_string list" 
 
 and bit_string = BitString  expression "expression list" 
@@ -178,6 +170,8 @@ and annotated_clause = AnnotatedClause clause
                       | AnnotatedClauseWithConstants clause "const list"
 
 and clause = Clause patterns guard expression
+
+and patterns = Patterns pattern | PatternsList "pattern list"
 
 and guard = When expression
 
@@ -200,9 +194,14 @@ and sequencing = Sequencing expression expression
 
 and catch = Catch expression
 
-
 (*                      ----------------------------------------                  *)
 
+
+datatype function_definition = FunctionDefinition  annotated_function_name  annotated_fun
+
+and annotated_function_name = FunctionName function_name | AnnotatedFunctionName function_name "const list"
+
+and annotated_fun = Function func | AnnotatedFun  func " const list"
 
 
 datatype bitstring_pattern = BitstringPatern  annotated_pattern "expression list"
@@ -231,8 +230,61 @@ datatype module_header = ModuleHeader "export list"  "attribute list"
 
 datatype annotated_module = AnnotatedModule module |  AnnotatedModuleWithConst module "const list"
 
-(**)
 
+(*
+and function_definition = FunctionDefinition  annotated_function_name  annotated_fun
+
+
+
+and annotation = Annotation "const list"
+
+
+
+and
+
+and module_end = End
+
+
+and annotated_pattern = AnnotatedVariable annotated_variable
+                        | AnnotatedPat pattern
+                        | AnnotatedPattern pattern "const list" 
+
+and annotated_variable = AnnotatedVar variable_name | AnnotatedVarWithConst variable_name "const list"
+
+*)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+(*needs to be checked:
+Constant (c):
+AtomicLiteral
+{ c1 , . . . , cn } (n  0)
+[ c1 , . . . , cn ] (n  1)
+[ c1 , . . . , cn−1 | cn ] (n  2)*)
+
+
+(* what is v
+AnnotatedPattern (p):
+v1
+Pattern
+( Pattern -| [ c1 , . . . , cn ] ) (n  0)*)
 
 
 
