@@ -1,10 +1,10 @@
-theory Core_Erlang_Syntax
+theory Core_Erlang_Syntax_test
   imports Main
 begin
 
-section \<open>Syntax\<close>
+section ‹Syntax›
 
-subsection \<open>Core Erlang Lexical Definitions\<close>
+subsection ‹Core Erlang Lexical Definitions›
 
 datatype sign = Plus | Minus
 
@@ -29,11 +29,11 @@ datatype lowercase = a | b | c | d | e | f | g | h | i | j | k | l | m |
 
 datatype inputchar = InputChar char
 
-definition valid_inputchar :: "char \<Rightarrow> bool"
+definition valid_inputchar :: "char ⇒ bool"
   where
-    "valid_inputchar ch \<equiv>
-     (\<not> ch =  CHR 0x0A)  \<and>
-     (\<not>  ch =  CHR 0x0D) "
+    "valid_inputchar ch ≡
+     (¬ ch =  CHR 0x0A)  ∧
+     (¬  ch =  CHR 0x0D) "
 
 datatype control = u0000 | u0001 | u0002 | u0003 | u0004 | u0005 | u0006 | u0007 | u0008 | u0009 | u000a |
                    u000b | u000c | u000d | u000e | u000f | u0010 | u0011 | u0012 | u0013 | u0014 | u0015 |
@@ -63,7 +63,7 @@ datatype escapechar = B | D | E | F | N | R | S | T | V | BackSlash | SingleQuot
 
 datatype escape =  EscapeOctal octal | EscapeCtrlChar ctrlchar | EscapeChar escapechar
 
-subsection \<open>Core Erlang Terminals\<close>
+subsection ‹Core Erlang Terminals›
 
 datatype 'a nonemptylist = Nonemptylist 'a "'a list"
 
@@ -81,7 +81,7 @@ datatype erlang_string = String "erlang_char list"
 
 datatype variable_name = UpperCharVar uppercase "namechar list" | UnderscoreVar "namechar nonemptylist"
 
-subsection \<open>Core Erlang Non-Terminals\<close>
+subsection ‹Core Erlang Non-Terminals›
 
 datatype erlang_nil = ErlangNil
 
@@ -92,6 +92,8 @@ datatype atomic_literal = IntegerLiteral integer
   | CharLiteral  erlang_char
   | StringLiteral erlang_string
 datatype  const = ConstAtom  atomic_literal |ConstList "const nonemptylist" |ConstTuple "const list" | ConstListWithTail "const nonemptylist" const
+
+datatype  annotation = Annotation "const list"
 
 datatype annotated_variable_name = AnnotatedVarName variable_name | AnnotatedVarNameWithConst variable_name " const list"
 
@@ -113,94 +115,87 @@ and pattern = AtomicLitPat atomic_literal
 
 datatype patterns = Patterns pattern | PatternsList "pattern list"
 
-datatype annotated_function_name = FunctionName function_name | AnnotatedFunctionName function_name "const list"
+(*To be checked*)
+datatype annotated_function_name = AnnotatedFunctionName function_name "annotation option" 
 
 datatype 'a annotated = Annotated 'a "const list" | Unannotated 'a
 
-datatype function_definition = FunctionDefinition  "function_name annotated"  "func annotated"
-
-and func = Fun "annotated_variable_name list" expression
 
 
-and expression = ValueListExp "value_list annotated"| SingleExp "single_expression annotated"
+datatype annotated_fun = AnnotatedFun func "annotation option"
+
+and function_definition = FunctionDefinition  annotated_function_name annotated_fun
+
+and func = Func "annotated_variable_name list" expression
+
+
+and expression = ValueListExp "value_list annotated"| SingleExp single_expression  "annotation option"
 
 
 and single_expression = AtomicLitExpr atomic_literal
                       | VarNameExpr variable_name
                       | FuncNameExpr function_name
                       | TupleExpr tuple
-                      | ListExpr expr_list
-                      | BinaryExp binary
-                      | LetExpr Let
-                      | CaseExpr Case
+                      | ListExpr erlang_list
+                      | BinaryExp   "bit_string list"
+                      | LetExpr erlang_let
+                      | CaseExpr erlang_case
                       | FunExpr func
-                      | LetRecExpr letrec
-                      | AppExpr application
-                      | InterModuleCallExpr inter_module_call
-                      | PrimOpCallExpr prim_op_call
-                      | TryExpr Try
-                      | ReceiveExpr receive
-                      | SequencingExpr sequencing
-                      | CatchExpr catch
+                      | LetRecExpr "function_definition list" expression
+                      | AppExpr  expression "expression list"
+                      | InterModuleCallExpr  expression expression  "expression list"
+                      | PrimOpCallExpr  string atom  "expression list"
+                      | TryExpr  expression variables expression variables expression
+                      | ReceiveExpr  "annotated_clause list" expression expression
+                      | SequencingExpr expression expression
+                      | CatchExpr expression
 
 and value_list = ValueList " single_expression annotated list"
 
 
 and tuple = Tuple "expression list"
 
-and expr_list = List "expression nonemptylist"
+and erlang_list = List "expression nonemptylist"
 				| ListWithTail "expression nonemptylist" expression
 
-and binary = Binary  "bit_string list" 
 
 and bit_string = BitString  expression "expression list" 
 
-and Let = LetE variables expression expression
+and erlang_let = ErlangLet variables expression expression
 
-and Case = ECase expression "annotated_clause list"
+and erlang_case = ErlangCase expression "annotated_clause list"
 
-and annotated_clause = AnnotatedClause clause
-                      | AnnotatedClauseWithConstants clause "const list"
+and annotated_clause = Clause patterns guard expression  "annotation list"
 
-and clause = Clause patterns guard expression
 
 and guard = When expression
 
 
-and letrec = Letrec "function_definition list" expression
 
-and application = Apply expression "expression list"
+datatype letrec = Letrec "function_definition list" expression
 
-and inter_module_call = call  expression expression  "expression list"
+datatype application = Apply expression "expression list"
 
-and prim_op_call = primop string atom  "expression list"
+datatype inter_module_call = call  expression expression  "expression list"
 
-and Try = ETry expression variables expression variables expression
+datatype prim_op_call = primop string atom  "expression list"
 
-and receive = Receive "annotated_clause list" timeout
+datatype Try = ETry expression variables expression variables expression
 
-and timeout = Timeout expression expression 
+datatype timeout = Timeout expression expression
 
-and sequencing = Sequencing expression expression
+datatype receive = Receive "annotated_clause list" timeout
 
-and catch = Catch expression
+datatype sequencing = Sequencing expression expression
+
+datatype catch = Catch expression
+
+
 
 
 (*                      ----------------------------------------                  *)
 
-
-
-datatype bitstring_pattern = BitstringPatern  annotated_pattern "expression list"
-
-datatype annotated_module = AModule module  | AnnotatedModule  module  "const list"
-
-datatype annotated_variable = AnnotatedVar variable_name | AnnotatedVarWithConst variable_name "const list"
-
-datatype  annotation = Annotation "const list"
-
 datatype  module_end = End
-
-datatype module_body = ModuleBody "function_definition list"
 
 datatype  attribute = Attribute  atom  const
 
@@ -208,13 +203,133 @@ datatype  export = Export  function_name
 
 datatype  module_header = ModuleHeader "export list"  "attribute list"
 
-datatype  module_header = ModuleHeader "export list"  "attribute list"
+datatype module_body = ModuleBody "function_definition list"
 
 datatype module = Module  atom module_header module_body module_end
 
-datatype module_header = ModuleHeader "export list"  "attribute list"
+datatype bitstring_pattern = BitstringPatern  annotated_pattern "expression list"
 
 datatype annotated_module = AnnotatedModule module |  AnnotatedModuleWithConst module "const list"
+
+datatype annotated_variable = AnnotatedVar variable_name | AnnotatedVarWithConst variable_name "const list"
+
+
+
+
+section ‹Static Semantics›
+
+subsection  ‹Module Definition›
+
+(** Validate Exported Functions **)
+
+fun extract_fun_name :: "function_definition ⇒ function_name" where
+"extract_fun_name (FunctionDefinition  (AnnotatedFunctionName function_name _) _) = function_name" 
+
+fun validate_exports :: "module ⇒ bool" where
+"validate_exports (Module _ (ModuleHeader exports _) (ModuleBody fun_defs) _) =
+  (∀fun_name ∈ set(map (λ (Export fname)=> fname ) exports).
+   ∃def_fname ∈ set (map (λ(FunctionDefinition (AnnotatedFunctionName fname _) _) => fname) fun_defs).
+  def_fname = fun_name)"
+
+
+
+(** Validate Module Attributes **)
+fun extract_key :: "attribute ⇒ atom" where
+"extract_key (Attribute key _) = key"
+
+fun is_distinct :: "'a list ⇒ bool" where
+"is_distinct [] = True" |
+"is_distinct (xx#xs) = (xx ∉ set xs ∧ is_distinct xs)"
+
+fun validate_unique_attributes :: "module ⇒ bool" where
+"validate_unique_attributes (Module _ (ModuleHeader _ attrs) _ _) =
+  distinct (map extract_key attrs)"
+
+
+(** Validate Function parameters **)
+
+fun digit_to_nat :: "digit ⇒ nat" where
+  "digit_to_nat Zero = 0"
+| "digit_to_nat One = 1"
+| "digit_to_nat Two = 2"
+| "digit_to_nat Three = 3"
+| "digit_to_nat Four = 4"
+| "digit_to_nat Five = 5"
+| "digit_to_nat Six = 6"
+| "digit_to_nat Seven = 7"
+| "digit_to_nat Eight = 8"
+| "digit_to_nat Nine = 9"
+
+fun nonemptylist_to_nat :: "digit nonemptylist ⇒ nat" where
+  "nonemptylist_to_nat (Nonemptylist num []) = digit_to_nat num"
+| "nonemptylist_to_nat (Nonemptylist num ds) = digit_to_nat num * 10 + nonemptylist_to_nat (Nonemptylist (hd ds) (tl ds))"
+
+fun integer_to_nat :: "integer ⇒ nat" where
+  "integer_to_nat (Integer (Some Plus) ds) = nonemptylist_to_nat ds"
+| "integer_to_nat (Integer (Some Minus) ds) =  nonemptylist_to_nat ds"
+| "integer_to_nat (Integer None ds) = nonemptylist_to_nat ds"
+
+
+fun extract_arity :: "function_definition ⇒ integer" where
+"extract_arity (FunctionDefinition  (AnnotatedFunctionName (FunctionName  _  arity) _) _)  = arity"
+
+fun extract_fun_params :: "function_definition ⇒ annotated_variable_name list" where
+"extract_fun_params (FunctionDefinition  _ (AnnotatedFun (Func params _) _))  = params"
+
+fun validate_function_definitions :: "module ⇒ bool" where
+"validate_function_definitions (Module _ _ (ModuleBody fun_defs) _) =
+  (∀fun_def ∈ set fun_defs.  (integer_to_nat (extract_arity fun_def)) =  ((length (extract_fun_params fun_def)):: nat))"
+  
+(** Validate Unique Function Names  **)
+
+fun validate_unique_function_names :: "module ⇒ bool" where
+"validate_unique_function_names (Module _ _ (ModuleBody fun_defs) _) =
+  distinct (map (λ(FunctionDefinition (AnnotatedFunctionName fname _) _) => fname) fun_defs)"
+
+subsection  ‹Atomic literals›
+
+(*To be checked: Empty Strings ""*)
+fun erlang_string_to_erlang_list :: "erlang_string ⇒ erlang_list" where
+"erlang_string_to_erlang_list (String chars) = List (Nonemptylist ( SingleExp (AtomicLitExpr (CharLiteral( Char (InputChar CHR 0x020)))) None) (map (λchar. SingleExp (AtomicLitExpr (CharLiteral char)) None) chars) )"
+
+subsection  ‹Lists›
+
+fun list_to_normal_form :: "erlang_list ⇒ erlang_list" where
+  "list_to_normal_form (List exps) = ListWithTail exps (SingleExp (AtomicLitExpr (NilLiteral(ErlangNil))) None) " |
+  "list_to_normal_form (ListWithTail exps exp) = ListWithTail exps exp"
+
+fun list_to_nonemptylist :: "'a list ⇒ 'a nonemptylist" where
+ " list_to_nonemptylist [] = undefined"|
+  " list_to_nonemptylist (exp_x#exp_xs) = Nonemptylist exp_x exp_xs"
+
+fun list_with_tail_to_normal_form :: "erlang_list ⇒ erlang_list" where
+ "list_with_tail_to_normal_form (List xs ) = undefined" |
+ "list_with_tail_to_normal_form (ListWithTail (Nonemptylist x_head []) x_tail) = ListWithTail (Nonemptylist x_head []) x_tail" |
+  "list_with_tail_to_normal_form (ListWithTail (Nonemptylist x_head (y_head # ys)) x_tail) = 
+    ListWithTail (Nonemptylist x_head (y_head#(butlast ys))) (SingleExp (ListExpr (ListWithTail (Nonemptylist (last ys) []) x_tail)) None)"
+(*
+fun list_with_tail_to_normal_form_2 :: "erlang_list ⇒ erlang_list" where
+  "list_with_tail_to_normal_form_2 (ListWithTail (Nonemptylist exp_x []) ys) = ListWithTail (Nonemptylist exp_x []) ys" |
+  "list_with_tail_to_normal_form_2 (ListWithTail (Nonemptylist exp_x (exp_xs)) ys) = 
+     ListWithTail (Nonemptylist exp_x []) (list_with_tail_to_normal_form (ListWithTail (list_to_nonemptylist exp_xs) ys))"
+*)
+
+
+(*
+fun list_with_tail_to_normal_form :: "erlang_list ⇒ erlang_list" where
+  "list_with_tail_to_normal_form (ListWithTail exps exp) = 
+     (if length exps > 1 
+      then ListWithTail (butlast exps) (ListWithTail [last exps] exp) 
+      else ListWithTail exps exp)"
+*)
+
+(*fun square::" nat ⇒ nat" where
+"square num = num * num"
+
+value "map square [1,2,3]"
+
+value "(map (extract_fun_name fun_defs))"
+*)
 
 (**)
 
