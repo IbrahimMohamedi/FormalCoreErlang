@@ -1,4 +1,4 @@
-theory Core_Erlang_Syntax_test
+theory Core_Erlang_Syntax
   imports Main
 begin
 
