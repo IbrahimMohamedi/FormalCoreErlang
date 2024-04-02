@@ -207,7 +207,7 @@ datatype module_body = ModuleBody "function_definition list"
 
 datatype module = Module  atom module_header module_body module_end
 
-datatype bitstring_pattern = BitstringPatern  annotated_pattern "expression list"
+datatype bitstring_pattern = BitstringPattern  annotated_pattern "expression list"
 
 datatype annotated_module = AnnotatedModule module |  AnnotatedModuleWithConst module "const list"
 
@@ -222,8 +222,8 @@ subsection  ‹Module Definition›
 
 (** Validate Exported Functions **)
 
-fun extract_fun_name :: "function_definition ⇒ function_name" where
-"extract_fun_name (FunctionDefinition  (AnnotatedFunctionName function_name _) _) = function_name" 
+fun get_fun_name :: "function_definition ⇒ function_name" where
+"get_fun_name (FunctionDefinition  (AnnotatedFunctionName function_name _) _) = function_name" 
 
 fun validate_exports :: "module ⇒ bool" where
 "validate_exports (Module _ (ModuleHeader exports _) (ModuleBody fun_defs) _) =
@@ -234,8 +234,8 @@ fun validate_exports :: "module ⇒ bool" where
 
 
 (** Validate Module Attributes **)
-fun extract_key :: "attribute ⇒ atom" where
-"extract_key (Attribute key _) = key"
+fun get_key :: "attribute ⇒ atom" where
+"get_key (Attribute key _) = key"
 
 fun is_distinct :: "'a list ⇒ bool" where
 "is_distinct [] = True" |
@@ -243,7 +243,7 @@ fun is_distinct :: "'a list ⇒ bool" where
 
 fun validate_unique_attributes :: "module ⇒ bool" where
 "validate_unique_attributes (Module _ (ModuleHeader _ attrs) _ _) =
-  distinct (map extract_key attrs)"
+  distinct (map get_key attrs)"
 
 
 (** Validate Function parameters **)
@@ -270,15 +270,15 @@ fun integer_to_nat :: "integer ⇒ nat" where
 | "integer_to_nat (Integer None ds) = nonemptylist_to_nat ds"
 
 
-fun extract_arity :: "function_definition ⇒ integer" where
-"extract_arity (FunctionDefinition  (AnnotatedFunctionName (FunctionName  _  arity) _) _)  = arity"
+fun get_arity :: "function_definition ⇒ integer" where
+"get_arity (FunctionDefinition  (AnnotatedFunctionName (FunctionName  _  arity) _) _)  = arity"
 
-fun extract_fun_params :: "function_definition ⇒ annotated_variable_name list" where
-"extract_fun_params (FunctionDefinition  _ (AnnotatedFun (Func params _) _))  = params"
+fun get_fun_params :: "function_definition ⇒ annotated_variable_name list" where
+"get_fun_params (FunctionDefinition  _ (AnnotatedFun (Func params _) _))  = params"
 
 fun validate_function_definitions :: "module ⇒ bool" where
 "validate_function_definitions (Module _ _ (ModuleBody fun_defs) _) =
-  (∀fun_def ∈ set fun_defs.  (integer_to_nat (extract_arity fun_def)) =  ((length (extract_fun_params fun_def)):: nat))"
+  (∀fun_def ∈ set fun_defs.  (integer_to_nat (get_arity fun_def)) =  ((length (get_fun_params fun_def)):: nat))"
   
 (** Validate Unique Function Names  **)
 
@@ -323,13 +323,152 @@ fun list_with_tail_to_normal_form :: "erlang_list ⇒ erlang_list" where
       else ListWithTail exps exp)"
 *)
 
-(*fun square::" nat ⇒ nat" where
-"square num = num * num"
+subsection  ‹Expressions›
+(* Function name & Variable name scope binding*)
 
-value "map square [1,2,3]"
+datatype scope = Scope "variable_name list" "function_name list"
 
-value "(map (extract_fun_name fun_defs))"
+fun extract_function_name :: "function_definition ⇒ function_name" where
+"extract_function_name (FunctionDefinition (AnnotatedFunctionName fname _) _) = fname"
+
+fun extract_var_name :: "annotated_variable_name ⇒ variable_name" where
+"extract_var_name (AnnotatedVarName var_name) = var_name"|
+"extract_var_name (AnnotatedVarNameWithConst var_name _) = var_name"
+
+fun extract_var_name_list :: "variables ⇒ variable_name list" where
+"extract_var_name_list (Variables (AnnotatedVarName var_name)) = [var_name]"|
+"extract_var_name_list  (Variables (AnnotatedVarNameWithConst var_name _)) = [var_name]" |
+"extract_var_name_list (VariablesList vars) = map extract_var_name vars "
+
+fun add_var_to_scope :: "variable_name ⇒ scope ⇒ scope" where
+"add_var_to_scope var (Scope vars funcs) = Scope (var # vars) funcs"
+
+fun add_vars_to_scope :: "variable_name list ⇒ scope ⇒ scope" where
+"add_vars_to_scope [] scope = scope" |
+"add_vars_to_scope (var # vs) scope = add_vars_to_scope vs (add_var_to_scope var scope)"
+
+fun add_func_to_scope :: "function_name ⇒ scope ⇒ scope" where
+"add_func_to_scope func (Scope vars funcs) = Scope vars (func # funcs)"
+
+fun in_scope_var :: "variable_name ⇒ scope ⇒ bool" where
+"in_scope_var var (Scope vars _) = (var ∈ set vars)"
+
+fun in_scope_func :: "function_name ⇒ scope ⇒ bool" where
+"in_scope_func func (Scope _ funcs) = (func ∈ set funcs)"
+
+fun extract_def_body :: "function_definition ⇒ expression" where
+"extract_def_body (FunctionDefinition _ (AnnotatedFun (Func _ body) _))  =  body"
+
+fun extract_def_vars :: "function_definition ⇒ annotated_variable_name list" where
+"extract_def_vars (FunctionDefinition _ (AnnotatedFun (Func vars _) _))  =  vars"
+
+fun validate_expr :: "expression ⇒ scope ⇒ bool" where
+"validate_expr (SingleExp (VarNameExpr var) None) scope = in_scope_var var scope" |
+"validate_expr (SingleExp (FuncNameExpr func)None) scope = in_scope_func func scope" |
+"validate_expr (SingleExp (LetExpr (ErlangLet  vars e1 e2)) None) scope =
+  (validate_expr e1 scope ∧ validate_expr e2 (add_vars_to_scope (extract_var_name_list vars) scope))" |
+"validate_expr (SingleExp (FunExpr (Func vars body)) None) scope =
+  validate_expr body (add_vars_to_scope (map extract_var_name vars) scope)" |
+"validate_expr (SingleExp (TryExpr  e1  vars1 e2  vars2 e3) None) scope =
+  (validate_expr e1 scope ∧ validate_expr e2 (add_vars_to_scope (extract_var_name_list vars1) scope) ∧
+   validate_expr e3 (add_vars_to_scope (extract_var_name_list vars2) scope))" |
+"validate_expr (SingleExp (LetRecExpr defs exp) None) scope =
+  (let new_scope = foldr add_func_to_scope (map extract_function_name defs) scope in
+  (∀def ∈ set defs. validate_expr (extract_def_body def) (add_vars_to_scope (map extract_var_name (extract_def_vars def)) new_scope))
+   ∧ validate_expr exp new_scope)" |
+"validate_expr _ _ = True"
+
+
+
+
+(*To be checked: validating only function expressions. Not definitions*)
+fun validate_fun :: "expression ⇒ bool" where
+"validate_fun (SingleExp (FunExpr (Func vars _)) None) = distinct vars" |
+"validate_fun _ = True"
+
+
+fun validate_let :: "expression ⇒ bool" where
+"validate_let (SingleExp (LetExpr (ErlangLet (VariablesList vars) _ _)) None) =  distinct vars" |
+"validate_let _ = True"
+
+
+(*To be checked: validating only TryExpr inside single expression*)
+fun validate_try :: "expression ⇒ bool" where
+"validate_try (SingleExp (TryExpr  _ (VariablesList vars1) _ (VariablesList vars2) _) None ) =  ((distinct vars1) ∨ (distinct vars2))" |
+"validate_try _ = True"
+
+(*To be checked: validating only catchExpr inside single expression*)
+(*catch has no variable?? not even a list of expressions*)
+(*fun validate_catch :: "expression ⇒ bool" where
+"validate_catch (SingleExp (CatchExpr exps) None ) =  distinct exps " |
+"validate_catch _ = True"
 *)
+
+fun get_patterns_list :: "annotated_clause  ⇒ pattern list" where 
+"get_patterns_list (Clause (PatternsList patts) _ _ _ ) = patts" |
+"get_patterns_list (Clause (Patterns patt) _ _ _ ) = [patt]"
+
+fun validate_case :: "expression ⇒ bool" where
+"validate_case (SingleExp (CaseExpr (ErlangCase _ clauses)) None) =   (∀c1 ∈ set clauses. ∀c2 ∈ set clauses. length (get_patterns_list c1) = length (get_patterns_list c2))" |
+"validate_case _ = True"
+
+(*To be checked: validating only receive inside single expression*)
+fun validate_receive :: "expression ⇒ bool" where
+"validate_receive (SingleExp (ReceiveExpr clauses _ _) None) = (∀c ∈ set clauses. length (get_patterns_list c) = 1)" |
+"validate_receive _ = True"
+
+
+fun get_function_names :: "function_definition list ⇒ annotated_function_name list" where
+"get_function_names [] = []" |
+"get_function_names ((FunctionDefinition fname _) # defs) =  fname # get_function_names defs"
+
+fun validate_letrec :: "expression ⇒ bool" where
+"validate_letrec (SingleExp(LetRecExpr defs _) None) = distinct (get_function_names defs)" |
+"validate_letrec _ = True"
+
+(*Clause and Patterns*)
+fun extract_vars_from_annotated_pattern :: "annotated_pattern ⇒ variable_name" where
+"extract_vars_from_annotated_pattern (AnnotatedPatern pat) = undefined"|
+"extract_vars_from_annotated_pattern (AnnotatedPaternWithConst _ _) = undefined"|
+"extract_vars_from_annotated_pattern (AnnotatedVarPattern var) = extract_var_name var"
+
+fun extract_vars_from_pattern :: "pattern ⇒ variable_name list" where
+"extract_vars_from_pattern (AtomicLitPat _) = []" |
+"extract_vars_from_pattern (TuplePat patts) = map extract_vars_from_annotated_pattern patts" |
+"extract_vars_from_pattern (ListPat patts) = map extract_vars_from_annotated_pattern patts " |
+"extract_vars_from_pattern (BitstringPat patts) = map extract_vars_from_annotated_pattern patts" |
+"extract_vars_from_pattern (ListPatWithTail patts patt) =extract_vars_from_pattern patt @ (map extract_vars_from_annotated_pattern patts)"
+
+fun is_valid_clause_pattern :: "annotated_clause ⇒ bool " where
+"is_valid_clause_pattern (Clause ( Patterns patt) _ _ _) = distinct (extract_vars_from_pattern patt) "|
+"is_valid_clause_pattern (Clause ( PatternsList patts) _ _ _) = distinct (map extract_vars_from_pattern patts) "
+
+fun valid_annotated_pattern :: "annotated_pattern ⇒ bool" where
+"valid_annotated_pattern  (AnnotatedVarPattern var_name) = True" |
+"valid_annotated_pattern  (AnnotatedPatern (AtomicLitPat atom)) = True" |
+"valid_annotated_pattern _ = False"
+
+fun valid_expression :: "expression ⇒ bool" where
+"valid_expression (SingleExp (AtomicLitExpr _) None) = True" |
+"valid_expression  (SingleExp (VarNameExpr _)None) = True" |
+"valid_expression _ = False"
+
+
+fun is_valid_bitstring_pattern :: "bitstring_pattern ⇒ bool" where
+"is_valid_bitstring_pattern (BitstringPattern patt exps) = 
+  (valid_annotated_pattern patt ∧ (∀exp ∈ set(map valid_expression exps). exp))"
+
+fun is_valid_guard :: "expression ⇒ bool" where
+"is_valid_guard (SingleExp (ReceiveExpr _ _ _) _) = False" |
+"is_valid_guard (SingleExp (AppExpr _ _) _) = False" |
+(*"is_valid_guard (SingleExp (TryExpr (ETry e1 vars e2 catch_vars e3))_) = 
+   ((vars = e2) ∧ (catch_vars = e3) ∧ (e3 = AtomicLitExpr (ConstAtom (AtomLiteral (Atom [''false''])))))" |*)
+"is_valid_guard _ = True"
+
+fun validate_clause :: "annotated_clause ⇒ bool" where
+"validate_clause (Clause ps (When guard) body annotation) = 
+  ((is_valid_clause_pattern((Clause ps (When guard) body annotation )) ∧ is_valid_guard guard ∧ valid_expression body))"
+
 
 (**)
 
