@@ -6,6 +6,8 @@ section ‹Syntax›
 
 subsection ‹Core Erlang Lexical Definitions›
 
+consts BIT_SIZE::nat
+
 datatype sign = Plus | Minus
 
 datatype digit = Zero | One | Two | Three | Four | Five | Six | Seven | Eight | Nine
@@ -286,6 +288,12 @@ fun validate_unique_function_names :: "module ⇒ bool" where
 "validate_unique_function_names (Module _ _ (ModuleBody fun_defs) _) =
   distinct (map (λ(FunctionDefinition (AnnotatedFunctionName fname _) _) => fname) fun_defs)"
 
+(** Validate Module  **)
+(*
+fun validate_module :: "module ⇒ bool" where
+"validate_module (mod) = validate_exports mod  ∧ validate_unique_attributes mod  ∧ validate_function_definitions mod  ∧ validate_unique_function_names mod  "
+*)
+
 subsection  ‹Atomic literals›
 
 (*To be checked: Empty Strings ""*)
@@ -362,39 +370,39 @@ fun extract_def_body :: "function_definition ⇒ expression" where
 fun extract_def_vars :: "function_definition ⇒ annotated_variable_name list" where
 "extract_def_vars (FunctionDefinition _ (AnnotatedFun (Func vars _) _))  =  vars"
 
-fun validate_expr :: "expression ⇒ scope ⇒ bool" where
-"validate_expr (SingleExp (VarNameExpr var) None) scope = in_scope_var var scope" |
-"validate_expr (SingleExp (FuncNameExpr func)None) scope = in_scope_func func scope" |
-"validate_expr (SingleExp (LetExpr (ErlangLet  vars e1 e2)) None) scope =
+function validate_expr :: "expression ⇒ scope ⇒ bool" where
+"validate_expr (SingleExp (VarNameExpr var) _) scope = in_scope_var var scope" |
+"validate_expr (SingleExp (FuncNameExpr func)_) scope = in_scope_func func scope" |
+"validate_expr (SingleExp (LetExpr (ErlangLet  vars e1 e2)) _) scope =
   (validate_expr e1 scope ∧ validate_expr e2 (add_vars_to_scope (extract_var_name_list vars) scope))" |
-"validate_expr (SingleExp (FunExpr (Func vars body)) None) scope =
+"validate_expr (SingleExp (FunExpr (Func vars body)) _) scope =
   validate_expr body (add_vars_to_scope (map extract_var_name vars) scope)" |
-"validate_expr (SingleExp (TryExpr  e1  vars1 e2  vars2 e3) None) scope =
+"validate_expr (SingleExp (TryExpr  e1  vars1 e2  vars2 e3) _) scope =
   (validate_expr e1 scope ∧ validate_expr e2 (add_vars_to_scope (extract_var_name_list vars1) scope) ∧
    validate_expr e3 (add_vars_to_scope (extract_var_name_list vars2) scope))" |
-"validate_expr (SingleExp (LetRecExpr defs exp) None) scope =
+"validate_expr (SingleExp (LetRecExpr defs exp) _) scope =
   (let new_scope = foldr add_func_to_scope (map extract_function_name defs) scope in
   (∀def ∈ set defs. validate_expr (extract_def_body def) (add_vars_to_scope (map extract_var_name (extract_def_vars def)) new_scope))
    ∧ validate_expr exp new_scope)" |
 "validate_expr _ _ = True"
-
-
-
+  sorry
+termination validate_expr
+  sorry
 
 (*To be checked: validating only function expressions. Not definitions*)
 fun validate_fun :: "expression ⇒ bool" where
-"validate_fun (SingleExp (FunExpr (Func vars _)) None) = distinct vars" |
+"validate_fun (SingleExp (FunExpr (Func vars _)) _) = distinct vars" |
 "validate_fun _ = True"
 
 
 fun validate_let :: "expression ⇒ bool" where
-"validate_let (SingleExp (LetExpr (ErlangLet (VariablesList vars) _ _)) None) =  distinct vars" |
+"validate_let (SingleExp (LetExpr (ErlangLet (VariablesList vars) _ _)) _) =  distinct vars" |
 "validate_let _ = True"
 
 
 (*To be checked: validating only TryExpr inside single expression*)
 fun validate_try :: "expression ⇒ bool" where
-"validate_try (SingleExp (TryExpr  _ (VariablesList vars1) _ (VariablesList vars2) _) None ) =  ((distinct vars1) ∨ (distinct vars2))" |
+"validate_try (SingleExp (TryExpr  _ (VariablesList vars1) _ (VariablesList vars2) _) _ ) =  ((distinct vars1) ∨ (distinct vars2))" |
 "validate_try _ = True"
 
 (*To be checked: validating only catchExpr inside single expression*)
@@ -409,12 +417,12 @@ fun get_patterns_list :: "annotated_clause  ⇒ pattern list" where
 "get_patterns_list (Clause (Patterns patt) _ _ _ ) = [patt]"
 
 fun validate_case :: "expression ⇒ bool" where
-"validate_case (SingleExp (CaseExpr (ErlangCase _ clauses)) None) =   (∀c1 ∈ set clauses. ∀c2 ∈ set clauses. length (get_patterns_list c1) = length (get_patterns_list c2))" |
+"validate_case (SingleExp (CaseExpr (ErlangCase _ clauses)) _) =   (∀c1 ∈ set clauses. ∀c2 ∈ set clauses. length (get_patterns_list c1) = length (get_patterns_list c2))" |
 "validate_case _ = True"
 
 (*To be checked: validating only receive inside single expression*)
 fun validate_receive :: "expression ⇒ bool" where
-"validate_receive (SingleExp (ReceiveExpr clauses _ _) None) = (∀c ∈ set clauses. length (get_patterns_list c) = 1)" |
+"validate_receive (SingleExp (ReceiveExpr clauses _ _) _) = (∀c ∈ set clauses. length (get_patterns_list c) = 1)" |
 "validate_receive _ = True"
 
 
@@ -448,26 +456,28 @@ fun valid_annotated_pattern :: "annotated_pattern ⇒ bool" where
 "valid_annotated_pattern  (AnnotatedPatern (AtomicLitPat atom)) = True" |
 "valid_annotated_pattern _ = False"
 
-fun valid_expression :: "expression ⇒ bool" where
-"valid_expression (SingleExp (AtomicLitExpr _) None) = True" |
-"valid_expression  (SingleExp (VarNameExpr _)None) = True" |
-"valid_expression _ = False"
+fun valid_bitstring_pattern_expression :: "expression ⇒ bool" where
+"valid_bitstring_pattern_expression (SingleExp (AtomicLitExpr _) None) = True" |
+"valid_bitstring_pattern_expression  (SingleExp (VarNameExpr _)None) = True" |
+"valid_bitstring_pattern_expression _ = False"
 
 
 fun is_valid_bitstring_pattern :: "bitstring_pattern ⇒ bool" where
 "is_valid_bitstring_pattern (BitstringPattern patt exps) = 
-  (valid_annotated_pattern patt ∧ (∀exp ∈ set(map valid_expression exps). exp))"
+  (valid_annotated_pattern patt ∧ (∀exp ∈ set(map valid_bitstring_pattern_expression exps). exp) ∧ (length exps = BIT_SIZE))"
 
 fun is_valid_guard :: "expression ⇒ bool" where
 "is_valid_guard (SingleExp (ReceiveExpr _ _ _) _) = False" |
 "is_valid_guard (SingleExp (AppExpr _ _) _) = False" |
-(*"is_valid_guard (SingleExp (TryExpr (ETry e1 vars e2 catch_vars e3))_) = 
-   ((vars = e2) ∧ (catch_vars = e3) ∧ (e3 = AtomicLitExpr (ConstAtom (AtomLiteral (Atom [''false''])))))" |*)
+"is_valid_guard (SingleExp (TryExpr e1 vars e2 catch_vars e3) None) = 
+    (e3 = (SingleExp (AtomicLitExpr (AtomLiteral (Atom ([InputChar CHR ''f'']))))) None)" |
+"is_valid_guard (SingleExp (TryExpr e1 vars e2 catch_vars e3) (Some(Annotation annotation))) = 
+    (e3 = (SingleExp (AtomicLitExpr (AtomLiteral (Atom ([InputChar CHR ''f'']))))) ( Some(Annotation annotation)) )" |
 "is_valid_guard _ = True"
 
 fun validate_clause :: "annotated_clause ⇒ bool" where
 "validate_clause (Clause ps (When guard) body annotation) = 
-  ((is_valid_clause_pattern((Clause ps (When guard) body annotation )) ∧ is_valid_guard guard ∧ valid_expression body))"
+  ((is_valid_clause_pattern((Clause ps (When guard) body annotation )) ∧ is_valid_guard guard ∧ valid_bitstring_pattern_expression body))"
 
 
 (**)
