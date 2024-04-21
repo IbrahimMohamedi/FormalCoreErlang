@@ -100,7 +100,7 @@ datatype  annotation = Annotation "const list"
 datatype annotated_variable_name = AnnotatedVarName variable_name | AnnotatedVarNameWithConst variable_name " const list"
 
 
-datatype  variables = Variables annotated_variable_name
+datatype  variables = Variable annotated_variable_name
             | VariablesList "annotated_variable_name list"
 
 
@@ -112,16 +112,17 @@ and pattern = AtomicLitPat atomic_literal
              | TuplePat "annotated_pattern list"
              | ListPat "annotated_pattern list"
              | BitstringPat  "annotated_pattern list" 
-             |  ListPatWithTail "annotated_pattern list" pattern
+             |  ListPatWithTail "annotated_pattern list" annotated_pattern
 
 
-datatype patterns = Patterns pattern | PatternsList "pattern list"
+datatype patterns = Pattern annotated_pattern | PatternsList "annotated_pattern list"
 
 (*To be checked*)
 datatype annotated_function_name = AnnotatedFunctionName function_name "annotation option" 
 
+(*
 datatype 'a annotated = Annotated 'a "const list" | Unannotated 'a
-
+*)
 
 
 datatype annotated_fun = AnnotatedFun func "annotation option"
@@ -131,7 +132,7 @@ and function_definition = FunctionDefinition  annotated_function_name annotated_
 and func = Func "annotated_variable_name list" expression
 
 
-and expression = ValueListExp "value_list annotated"| SingleExp single_expression  "annotation option"
+and expression = ValueListExp value_list "annotation option"| SingleExp single_expression  "annotation option"
 
 
 and single_expression = AtomicLitExpr atomic_literal
@@ -152,7 +153,7 @@ and single_expression = AtomicLitExpr atomic_literal
                       | SequencingExpr expression expression
                       | CatchExpr expression
 
-and value_list = ValueList " single_expression annotated list"
+and value_list = ValueList "single_expression list" "annotation option"
 
 
 and tuple = Tuple "expression list"
@@ -180,7 +181,7 @@ datatype application = Apply expression "expression list"
 
 datatype inter_module_call = call  expression expression  "expression list"
 
-datatype prim_op_call = primop string atom  "expression list"
+datatype prim_op_call = Primop  atom  "expression list"
 
 datatype Try = ETry expression variables expression variables expression
 
@@ -336,6 +337,13 @@ subsection  ‹Expressions›
 
 datatype scope = Scope "variable_name list" "function_name list"
 
+abbreviation true :: atom where
+  "true ≡ Atom [InputChar (CHR ''t''), InputChar (CHR ''r''), InputChar (CHR ''u''), InputChar (CHR ''e'')]"
+
+abbreviation false :: atom where
+  "false ≡ Atom [InputChar (CHR ''f''), InputChar (CHR ''a''), InputChar (CHR ''l''), InputChar (CHR ''s''), InputChar (CHR ''e'')]"
+
+
 fun extract_function_name :: "function_definition ⇒ function_name" where
 "extract_function_name (FunctionDefinition (AnnotatedFunctionName fname _) _) = fname"
 
@@ -344,8 +352,8 @@ fun extract_var_name :: "annotated_variable_name ⇒ variable_name" where
 "extract_var_name (AnnotatedVarNameWithConst var_name _) = var_name"
 
 fun extract_var_name_list :: "variables ⇒ variable_name list" where
-"extract_var_name_list (Variables (AnnotatedVarName var_name)) = [var_name]"|
-"extract_var_name_list  (Variables (AnnotatedVarNameWithConst var_name _)) = [var_name]" |
+"extract_var_name_list (Variable (AnnotatedVarName var_name)) = [var_name]"|
+"extract_var_name_list  (Variable (AnnotatedVarNameWithConst var_name _)) = [var_name]" |
 "extract_var_name_list (VariablesList vars) = map extract_var_name vars "
 
 fun add_var_to_scope :: "variable_name ⇒ scope ⇒ scope" where
@@ -412,9 +420,9 @@ fun validate_try :: "expression ⇒ bool" where
 "validate_catch _ = True"
 *)
 
-fun get_patterns_list :: "annotated_clause  ⇒ pattern list" where 
+fun get_patterns_list :: "annotated_clause  ⇒ annotated_pattern list" where 
 "get_patterns_list (Clause (PatternsList patts) _ _ _ ) = patts" |
-"get_patterns_list (Clause (Patterns patt) _ _ _ ) = [patt]"
+"get_patterns_list (Clause (Pattern patt) _ _ _ ) = [patt]"
 
 fun validate_case :: "expression ⇒ bool" where
 "validate_case (SingleExp (CaseExpr (ErlangCase _ clauses)) _) =   (∀c1 ∈ set clauses. ∀c2 ∈ set clauses. length (get_patterns_list c1) = length (get_patterns_list c2))" |
@@ -435,21 +443,31 @@ fun validate_letrec :: "expression ⇒ bool" where
 "validate_letrec _ = True"
 
 (*Clause and Patterns*)
-fun extract_vars_from_annotated_pattern :: "annotated_pattern ⇒ variable_name" where
-"extract_vars_from_annotated_pattern (AnnotatedPatern pat) = undefined"|
-"extract_vars_from_annotated_pattern (AnnotatedPaternWithConst _ _) = undefined"|
-"extract_vars_from_annotated_pattern (AnnotatedVarPattern var) = extract_var_name var"
+fun extract_vars_from_annotated_pattern :: "annotated_pattern ⇒ variable_name list" where
+"extract_vars_from_annotated_pattern (AnnotatedVarPattern var) = [extract_var_name var]"|
+"extract_vars_from_annotated_pattern (AnnotatedPatern (AtomicLitPat _)) = []"|
+"extract_vars_from_annotated_pattern (AnnotatedPatern (TuplePat patts)) = concat( map extract_vars_from_annotated_pattern patts)"|    
+"extract_vars_from_annotated_pattern (AnnotatedPatern (ListPat patts)) = concat( map extract_vars_from_annotated_pattern patts)"|  
+"extract_vars_from_annotated_pattern (AnnotatedPatern (BitstringPat patts)) = concat( map extract_vars_from_annotated_pattern patts)"|
+"extract_vars_from_annotated_pattern (AnnotatedPatern (ListPatWithTail patts patt)) = concat( map extract_vars_from_annotated_pattern (patts@[patt]))"|
+"extract_vars_from_annotated_pattern (AnnotatedPaternWithConst   (AtomicLitPat _) _) = []"|
+"extract_vars_from_annotated_pattern (AnnotatedPaternWithConst   (TuplePat patts) _) =  concat( map extract_vars_from_annotated_pattern patts)"|
+"extract_vars_from_annotated_pattern (AnnotatedPaternWithConst   (ListPat patts) _) =  concat( map extract_vars_from_annotated_pattern patts)"|
+"extract_vars_from_annotated_pattern (AnnotatedPaternWithConst   (BitstringPat patts) _) =  concat( map extract_vars_from_annotated_pattern patts)"|
+"extract_vars_from_annotated_pattern (AnnotatedPaternWithConst  (ListPatWithTail patts patt) _) =  concat( map extract_vars_from_annotated_pattern (patts@[patt]))"
 
+(*
 fun extract_vars_from_pattern :: "pattern ⇒ variable_name list" where
 "extract_vars_from_pattern (AtomicLitPat _) = []" |
 "extract_vars_from_pattern (TuplePat patts) = map extract_vars_from_annotated_pattern patts" |
 "extract_vars_from_pattern (ListPat patts) = map extract_vars_from_annotated_pattern patts " |
 "extract_vars_from_pattern (BitstringPat patts) = map extract_vars_from_annotated_pattern patts" |
 "extract_vars_from_pattern (ListPatWithTail patts patt) =extract_vars_from_pattern patt @ (map extract_vars_from_annotated_pattern patts)"
+*)
 
 fun is_valid_clause_pattern :: "annotated_clause ⇒ bool " where
-"is_valid_clause_pattern (Clause ( Patterns patt) _ _ _) = distinct (extract_vars_from_pattern patt) "|
-"is_valid_clause_pattern (Clause ( PatternsList patts) _ _ _) = distinct (map extract_vars_from_pattern patts) "
+"is_valid_clause_pattern (Clause ( Pattern patt) _ _ _) = distinct (extract_vars_from_annotated_pattern patt) "|
+"is_valid_clause_pattern (Clause ( PatternsList patts) _ _ _) = distinct (map extract_vars_from_annotated_pattern patts) "
 
 fun valid_annotated_pattern :: "annotated_pattern ⇒ bool" where
 "valid_annotated_pattern  (AnnotatedVarPattern var_name) = True" |
@@ -466,19 +484,216 @@ fun is_valid_bitstring_pattern :: "bitstring_pattern ⇒ bool" where
 "is_valid_bitstring_pattern (BitstringPattern patt exps) = 
   (valid_annotated_pattern patt ∧ (∀exp ∈ set(map valid_bitstring_pattern_expression exps). exp) ∧ (length exps = BIT_SIZE))"
 
+(* To be checked: comparing variable_names! ! ! ! 
+fun extract_vars_from_exp :: "single_expression ⇒ annotated_variable_name " where
+"extract_vars_from_exp (VarNameExpr var) = AnnotatedVarName var" |
+"extract_vars_from_exp _  = undefined"
+
+fun validate_try :: "annotated_variable_name  ⇒ annotated_variable_name   ⇒ bool " where
+"validate_try (AnnotatedVarName var1) (AnnotatedVarName var2) = (var1 = var2)"|
+"validate_try (AnnotatedVarNameWithConst var1 conts) (AnnotatedVarName var2) = (var1 = var2)"|
+"validate_try (AnnotatedVarNameWithConst var1 conts) (AnnotatedVarNameWithConst var2 vc) = (var1 = var2)"|
+"validate_try (AnnotatedVarName var1) (AnnotatedVarNameWithConst var2 conts) = (var1 = var2)"
+*)
+
+
 fun is_valid_guard :: "expression ⇒ bool" where
 "is_valid_guard (SingleExp (ReceiveExpr _ _ _) _) = False" |
 "is_valid_guard (SingleExp (AppExpr _ _) _) = False" |
 "is_valid_guard (SingleExp (TryExpr e1 vars e2 catch_vars e3) None) = 
     (e3 = (SingleExp (AtomicLitExpr (AtomLiteral (Atom ([InputChar CHR ''f'']))))) None)" |
-"is_valid_guard (SingleExp (TryExpr e1 vars e2 catch_vars e3) (Some(Annotation annotation))) = 
-    (e3 = (SingleExp (AtomicLitExpr (AtomLiteral (Atom ([InputChar CHR ''f'']))))) ( Some(Annotation annotation)) )" |
+"is_valid_guard (SingleExp (TryExpr e1 (VariablesList vars) (ValueListExp (ValueList e2 _) _) catch_vars e3) (Some(Annotation annotation))) = 
+    ((e3 = (SingleExp (AtomicLitExpr (AtomLiteral false)))
+ ( Some(Annotation annotation)) )  ∧ (length vars = length e2))" |
+"is_valid_guard (SingleExp (TryExpr _ _ _ _ _) _) = False"|
 "is_valid_guard _ = True"
 
 fun validate_clause :: "annotated_clause ⇒ bool" where
 "validate_clause (Clause ps (When guard) body annotation) = 
   ((is_valid_clause_pattern((Clause ps (When guard) body annotation )) ∧ is_valid_guard guard ∧ valid_bitstring_pattern_expression body))"
 
+section ‹Dynamic Semantics›
+(* To be checked: vars are not considered values? lists and tuples could be included *)
+
+datatype erlang_value =  AtomicValue atomic_literal  | ListValue "erlang_value list" | TupleValue  "erlang_value list" | BitStringValue  "erlang_value list"
+
+datatype exception = Error prim_op_call | Exit prim_op_call | Throw prim_op_call
+
+datatype result = Result  "erlang_value list" | Exception exception | UndefinedBehaviour 
+
+type_synonym env = "variable_name ⇒ erlang_value option"
+
+(*Helper finctions for lists & vlaue_lists*)
+fun is_value_result :: "result list ⇒ bool" where
+"is_value_result [] = True" |
+"is_value_result (Result vals # rs) = ((is_value_result rs) ∧ (length vals = 1)) " |
+"is_value_result (_ # _) = False"
+
+fun get_value_from_result :: "result ⇒ erlang_value" where
+"get_value_from_result (Result [val]) = val" |
+"get_value_from_result _ = undefined"
+
+fun is_exception_or_undefined :: "result ⇒ bool" where
+"is_exception_or_undefined (Exception _) = True" |
+"is_exception_or_undefined (UndefinedBehaviour) = True" |
+"is_exception_or_undefined _ = False"
+
+fun handle_exceptions_or_undefined :: "result list ⇒ result" where
+"handle_exceptions_or_undefined results = (case find is_exception_or_undefined results of
+                                None ⇒ UndefinedBehaviour
+                              | Some ex ⇒ ex)"
+
+fun result_to_value_list :: "result ⇒ erlang_value list" where
+"result_to_value_list (Result vs) = vs" |
+"result_to_value_list _ = []"
+
+fun sequence_results :: "result list ⇒ result" where
+"sequence_results results = (if is_value_result results then
+                              Result (concat (map result_to_value_list results))
+                            else handle_exceptions_or_undefined results)"
+
+(*Helper function for let*)
+fun extend_env :: "env ⇒ variable_name list ⇒ erlang_value list ⇒ env" where
+"extend_env env [] [] = env" |
+"extend_env env (var#vars) (val#vals) =
+  (λx. if x = var then Some val else extend_env env vars vals x)" |
+"extend_env _ _ _ = undefined"  
+
+(*pattern matching helpers *)
+fun match_atomic :: "atomic_literal ⇒ erlang_value ⇒ bool" where
+"match_atomic (IntegerLiteral intgr) (AtomicValue (IntegerLiteral iv )) = (intgr = iv)" |
+"match_atomic (FloatLiteral float) (AtomicValue (FloatLiteral fv)) = (float = fv)" |
+"match_atomic (AtomLiteral atom)(AtomicValue (AtomLiteral av)) = (atom = av)" |
+"match_atomic (CharLiteral ch) (AtomicValue(CharLiteral cv)) = (ch = cv)" |
+"match_atomic (NilLiteral (ErlangNil)) (ListValue []) = True" |
+"match_atomic _ _ = False"
+
+
+(*ToDo: implement match_bit_string*)
+fun match_patterns :: "annotated_pattern list ⇒ erlang_value list ⇒ env ⇒ env option" where
+
+"match_patterns [] [] env = Some env" |
+
+"match_patterns [(AnnotatedVarPattern (AnnotatedVarName var))] [val] env = Some(env(var ↦ val))" |
+
+"match_patterns (AnnotatedPatern (AtomicLitPat lit) # ps) (val # vs) env =
+   (if match_atomic lit val then match_patterns ps vs env else None)" |
+
+"match_patterns (AnnotatedPatern (TuplePat  pat) # ps) (TupleValue vals # vs) env =
+   (case match_patterns pat vals env of
+      Some env' ⇒ match_patterns ps vs env'
+    | None ⇒ None)" |
+"match_patterns (AnnotatedPatern(ListPat pat) # ps) (ListValue vals # vs) env =
+   (case match_patterns pat vals env of
+      Some env' ⇒ match_patterns ps vs env'
+    | None ⇒ None)" |
+"match_patterns (AnnotatedPatern(BitstringPat pat) # ps) (BitStringValue bval # vs) env =
+   (case match_patterns pat bval env of
+      Some env' ⇒ match_patterns ps vs env'
+    | None ⇒ None)" |
+"match_patterns (AnnotatedPatern (ListPatWithTail pat pat2)#ps) (ListValue vals # vs) env =
+   (case match_patterns (pat@[pat2]) vals env of
+      Some env' ⇒ match_patterns ps vs env'
+    | None ⇒ None)" |
+"match_patterns _ _ _ = None"
+
+datatype select_case_result = 
+    ClauseMatched "env * guard * expression" 
+  | NoMatch
+
+
+fun select_case :: "erlang_value list ⇒ annotated_clause list ⇒ env ⇒ select_case_result" where
+
+"select_case _ [] _ = NoMatch" |
+
+"select_case case_values ((Clause (Pattern patt)  guard body _) # rest) env =
+  (case match_patterns [patt] case_values env of
+     Some env' ⇒ ClauseMatched (env', guard, body)
+   | None ⇒ select_case case_values rest env)"|
+
+"select_case case_values ((Clause (PatternsList patts)  guard body _) # rest) env =
+  (case match_patterns patts case_values env of
+     Some env' ⇒ ClauseMatched (env', guard, body)
+   | None ⇒ select_case case_values rest env)"
+
+
+
+fun erlang_eval :: "expression ⇒ env ⇒ result" where
+
+  "erlang_eval (SingleExp (AtomicLitExpr lit)_) _ = Result [AtomicValue lit]" |
+
+  "erlang_eval (SingleExp(VarNameExpr var)_) env = (case env var of
+                                  Some val ⇒ Result [val]
+                                | None ⇒ UndefinedBehaviour)" |
+
+  "erlang_eval (ValueListExp (ValueList exps _)  _) env = (let vals = map (λe. erlang_eval (SingleExp e None) env) exps in
+                                if is_value_result vals then Result (map get_value_from_result vals)
+                                else handle_exceptions_or_undefined vals)" |
+
+  "erlang_eval (SingleExp(TupleExpr (Tuple exps))_) env = (let vals = map (λe. erlang_eval e env) exps in
+                                if is_value_result vals then Result (map get_value_from_result vals)
+                                else handle_exceptions_or_undefined vals)" |
+
+  "erlang_eval  (SingleExp (ListExpr (List(Nonemptylist exp exps)))_) env = (let vals = map (λe. erlang_eval e env) (exp#exps) in
+                               if is_value_result vals then Result (map get_value_from_result vals)
+                               else handle_exceptions_or_undefined vals)" |
+
+  "erlang_eval  (SingleExp (ListExpr (ListWithTail(Nonemptylist exp1 exps) exp2 ))_) env = 
+                            (let vals = map (λe. erlang_eval e env) (exp1#exps @ [exp2]) in
+                               if is_value_result vals then Result (map get_value_from_result vals)
+                               else handle_exceptions_or_undefined vals)"  |
+
+  "erlang_eval  (SingleExp (BinaryExp bitstr) _) env = undefined" |
+
+  "erlang_eval  (SingleExp (LetExpr (ErlangLet (VariablesList vars) e1 e2))_) env =  (case erlang_eval e1 env of
+                               Result vals ⇒ if length vals = length vars then
+                                  erlang_eval e2 (extend_env env (extract_var_name_list (VariablesList vars)) vals)
+                               else UndefinedBehaviour |
+                                 Exception ex ⇒Exception ex  | UndefinedBehaviour ⇒ UndefinedBehaviour )" |
+
+  "erlang_eval  (SingleExp (CaseExpr(ErlangCase switch_expr clauses))_) env = (case erlang_eval switch_expr env of
+                               Result switch_values ⇒ 
+                                  (case select_case switch_values clauses env of
+                                     ClauseMatched (env', When guard, body) ⇒
+                                       (case erlang_eval guard env' of
+                                          Result [AtomicValue (AtomLiteral true)] ⇒ erlang_eval body env'
+                                        | _ ⇒ UndefinedBehaviour) 
+                                    | NoMatch ⇒ UndefinedBehaviour)
+                                | Exception ex ⇒Exception ex  | UndefinedBehaviour ⇒ UndefinedBehaviour )" |
+  "erlang_eval (SingleExp (FuncNameExpr _) _) env = undefined"|
+  "erlang_eval (SingleExp (LetExpr (ErlangLet (Variable _) _ _)) _) env = undefined"|
+  "erlang_eval (SingleExp (FunExpr _) _) env = undefined"|
+  "erlang_eval (SingleExp (LetRecExpr _ _) _) env = undefined"|
+  "erlang_eval (SingleExp (AppExpr _ _) _)env = undefined"|
+  "erlang_eval (SingleExp (InterModuleCallExpr _ _ _) _) env = undefined"|
+  "erlang_eval (SingleExp (PrimOpCallExpr _ _ _) _) env = undefined"|
+  "erlang_eval (SingleExp (TryExpr _ _ _ _ _) _) env = undefined   "|
+  "erlang_eval (SingleExp (ReceiveExpr _ _ _) _) env = undefined   "|
+  "erlang_eval (SingleExp (SequencingExpr _ _ ) _) env = undefined"|
+  "erlang_eval (SingleExp (CatchExpr _) _) env = undefined"
+  sorry
+termination erlang_eval
+  sorry
+(*
+  "erlang_eval  (SingleExp (AppExpr f_expr arg_exprs)_) env = 
+     (case erlang_eval f_expr env of
+        Result [Closure params body f_env] ⇒ 
+          (if length params = length arg_exprs then
+             let arg_results = map (λarg. erlang_eval arg env) arg_exprs;
+                 combined_results = sequence_results arg_results
+             in case combined_results of
+                  Result args ⇒ erlang_eval body (extend_env f_env params args)
+                | _ ⇒ combined_results
+           else UndefinedBehaviour)
+      | Result _ ⇒ UndefinedBehaviour
+      | exp ⇒ exp)"
+*)
+
+(*
+fun erlang_eval :: "expression => env ⇒ result " where
+"erlang_eval (SingleExp(AtomicLitExpr atom ) _) env  =  (Result [AtomicValue atom] ) " |
+"erlang_eval (ValueListExp (ValueList exps _)  _) =  erlang_eval (SingleExp ex  _) @ erlang_eval(ValueListExp (ValueList exps _)  _)" 
+*)
 
 (**)
 
