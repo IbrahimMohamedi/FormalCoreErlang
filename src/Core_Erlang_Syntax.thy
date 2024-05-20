@@ -524,39 +524,53 @@ datatype result = Result  "erlang_value list" | Exception exception | UndefinedB
 type_synonym env = "variable_name ⇒ erlang_value option"
 
 (*Helper finctions for lists & vlaue_lists*)
-fun is_value_result :: "result list ⇒ bool" where
-"is_value_result [] = True" |
-"is_value_result (Result vals # rs) = ((is_value_result rs) ∧ (length vals = 1)) " |
-"is_value_result (_ # _) = False"
+(*use list_all function term list_all*)
+
+fun is_value_result :: "result ⇒ bool" where
+"is_value_result (Result [_]) = True" |
+"is_value_result _ = False"
+
 
 fun get_value_from_result :: "result ⇒ erlang_value" where
 "get_value_from_result (Result [val]) = val" |
 "get_value_from_result _ = undefined"
 
-fun is_exception_or_undefined :: "result ⇒ bool" where
-"is_exception_or_undefined (Exception _) = True" |
-"is_exception_or_undefined (UndefinedBehaviour) = True" |
-"is_exception_or_undefined _ = False"
+fun is_exception :: "result  ⇒ bool" where
+"is_exception (Exception _) = True" |
+"is_exception _ = False"
 
+
+fun get_exception :: "result list ⇒ result" where
+"get_exception (ex#results) = (if is_exception ex then ex else get_exception results)" |
+"get_exception [] = UndefinedBehaviour"
+(*
+fun is_undefined :: "result ⇒ bool" where
+"is_undefined (UndefinedBehaviour) = True" |
+"is_undefined _ = False"*)
+
+(*return undefined behaviour if it occurs at any point*)
 fun handle_exceptions_or_undefined :: "result list ⇒ result" where
-"handle_exceptions_or_undefined results = (case find is_exception_or_undefined results of
-                                None ⇒ UndefinedBehaviour
-                              | Some ex ⇒ ex)"
+"handle_exceptions_or_undefined results =(if (UndefinedBehaviour \<in> set results) then UndefinedBehaviour
+                                            else get_exception results )"
 
 fun result_to_value_list :: "result ⇒ erlang_value list" where
 "result_to_value_list (Result vs) = vs" |
 "result_to_value_list _ = []"
 
 fun sequence_results :: "result list ⇒ result" where
-"sequence_results results = (if is_value_result results then
+"sequence_results results = (if (list_all is_value_result results) then
                               Result (concat (map result_to_value_list results))
                             else handle_exceptions_or_undefined results)"
 
 (*Helper function for let*)
-fun extend_env :: "env ⇒ variable_name list ⇒ erlang_value list ⇒ env" where
-"extend_env env [] [] = env" |
-"extend_env env (var#vars) (val#vals) =
-  (λx. if x = var then Some val else extend_env env vars vals x)" |
+(*could be improved by having a list of pairs *)
+fun extend_env :: "env ⇒ variable_name list ⇒ result ⇒ env" where
+"extend_env env [] (Result []) = env" |
+"extend_env env (var#vars) (Result (val#vals)) =
+  (λx. if x = var then Some val else extend_env env  vars (Result vals) x)" |
+(*check exception *)
+(*"extend_env env (var#vars) (Exception ex) =
+  (λx. if x = ex then Some ex else None)" |*)
 "extend_env _ _ _ = undefined"  
 
 (*pattern matching helpers *)
@@ -567,6 +581,8 @@ fun match_atomic :: "atomic_literal ⇒ erlang_value ⇒ bool" where
 "match_atomic (CharLiteral ch) (AtomicValue(CharLiteral cv)) = (ch = cv)" |
 "match_atomic (NilLiteral (ErlangNil)) (ListValue []) = True" |
 "match_atomic _ _ = False"
+
+
 
 
 (*ToDo: implement match_bit_string*)
@@ -602,23 +618,24 @@ datatype select_case_result =
   | NoMatch
 
 
-fun select_case :: "erlang_value list ⇒ annotated_clause list ⇒ env ⇒ select_case_result" where
+fun select_case :: "erlang_value list ⇒ annotated_clause  ⇒ env ⇒ select_case_result" where
 
-"select_case _ [] _ = NoMatch" |
-
-"select_case case_values ((Clause (Pattern patt)  guard body _) # rest) env =
+"select_case case_values (Clause (Pattern patt)  guard body _)  env =
   (case match_patterns [patt] case_values env of
      Some env' ⇒ ClauseMatched (env', guard, body)
-   | None ⇒ select_case case_values rest env)"|
+   | None ⇒NoMatch)"|
 
-"select_case case_values ((Clause (PatternsList patts)  guard body _) # rest) env =
+"select_case case_values (Clause (PatternsList patts)  guard body _)  env =
   (case match_patterns patts case_values env of
      Some env' ⇒ ClauseMatched (env', guard, body)
-   | None ⇒ select_case case_values rest env)"
+   | None ⇒NoMatch)"
 
+(*Try*)
+fun get_annotated_variables ::" variables  ⇒ annotated_variable_name list" where
+"get_annotated_variables (Variable var)  = [var]" |
+"get_annotated_variables (VariablesList vars)  = vars"
 
-
-fun erlang_eval :: "expression ⇒ env ⇒ result" where
+function erlang_eval :: "expression ⇒ env ⇒ result" where
 
   "erlang_eval (SingleExp (AtomicLitExpr lit)_) _ = Result [AtomicValue lit]" |
 
@@ -627,73 +644,72 @@ fun erlang_eval :: "expression ⇒ env ⇒ result" where
                                 | None ⇒ UndefinedBehaviour)" |
 
   "erlang_eval (ValueListExp (ValueList exps _)  _) env = (let vals = map (λe. erlang_eval (SingleExp e None) env) exps in
-                                if is_value_result vals then Result (map get_value_from_result vals)
+                                if (list_all is_value_result vals) then Result (map get_value_from_result vals)
                                 else handle_exceptions_or_undefined vals)" |
 
   "erlang_eval (SingleExp(TupleExpr (Tuple exps))_) env = (let vals = map (λe. erlang_eval e env) exps in
-                                if is_value_result vals then Result (map get_value_from_result vals)
+                                 if (list_all is_value_result vals) then Result (map get_value_from_result vals)
                                 else handle_exceptions_or_undefined vals)" |
 
   "erlang_eval  (SingleExp (ListExpr (List(Nonemptylist exp exps)))_) env = (let vals = map (λe. erlang_eval e env) (exp#exps) in
-                               if is_value_result vals then Result (map get_value_from_result vals)
+                                if (list_all is_value_result vals) then Result (map get_value_from_result vals)
                                else handle_exceptions_or_undefined vals)" |
 
   "erlang_eval  (SingleExp (ListExpr (ListWithTail(Nonemptylist exp1 exps) exp2 ))_) env = 
                             (let vals = map (λe. erlang_eval e env) (exp1#exps @ [exp2]) in
-                               if is_value_result vals then Result (map get_value_from_result vals)
+                               if (list_all is_value_result vals) then Result (map get_value_from_result vals)
                                else handle_exceptions_or_undefined vals)"  |
 
   "erlang_eval  (SingleExp (BinaryExp bitstr) _) env = undefined" |
 
   "erlang_eval  (SingleExp (LetExpr (ErlangLet (VariablesList vars) e1 e2))_) env =  (case erlang_eval e1 env of
                                Result vals ⇒ if length vals = length vars then
-                                  erlang_eval e2 (extend_env env (extract_var_name_list (VariablesList vars)) vals)
+                                  erlang_eval e2 (extend_env env (extract_var_name_list (VariablesList vars)) (Result vals))
                                else UndefinedBehaviour |
                                  Exception ex ⇒Exception ex  | UndefinedBehaviour ⇒ UndefinedBehaviour )" |
 
-  "erlang_eval  (SingleExp (CaseExpr(ErlangCase switch_expr clauses))_) env = (case erlang_eval switch_expr env of
+  "erlang_eval (SingleExp (LetExpr (ErlangLet (Variable var) e1 e2)) _) env =  (case erlang_eval e1 env of
+                               Result vals ⇒ if length vals = length [var] then
+                                  erlang_eval e2 (extend_env env (extract_var_name_list (VariablesList [var])) (Result vals))
+                               else UndefinedBehaviour |
+                                 Exception ex ⇒Exception ex  | UndefinedBehaviour ⇒ UndefinedBehaviour )"|
+
+(*what happens if the guard is false > we need to double check  *)
+ "erlang_eval  (SingleExp (CaseExpr(ErlangCase switch_expr []))_) env = UndefinedBehaviour "|
+
+  "erlang_eval  (SingleExp (CaseExpr(ErlangCase switch_expr (cl#clauses)))_) env = (case erlang_eval switch_expr env of
                                Result switch_values ⇒ 
-                                  (case select_case switch_values clauses env of
+                                  (case select_case switch_values cl env of
                                      ClauseMatched (env', When guard, body) ⇒
                                        (case erlang_eval guard env' of
                                           Result [AtomicValue (AtomLiteral true)] ⇒ erlang_eval body env'
-                                        | _ ⇒ UndefinedBehaviour) 
-                                    | NoMatch ⇒ UndefinedBehaviour)
+                                        | Result [AtomicValue (AtomLiteral false)] ⇒ 
+                                            erlang_eval  (SingleExp (CaseExpr(ErlangCase switch_expr clauses))None) env) 
+                                    | NoMatch ⇒ erlang_eval  (SingleExp (CaseExpr(ErlangCase switch_expr clauses))None) env)
                                 | Exception ex ⇒Exception ex  | UndefinedBehaviour ⇒ UndefinedBehaviour )" |
+
+  "erlang_eval (SingleExp (TryExpr expr vars try_expr catch_vars catch_expr) _) env =
+    (case erlang_eval expr env of
+      Result vals ⇒ erlang_eval try_expr (extend_env env (map extract_var_name (get_annotated_variables vars)) (Result vals))
+    | Exception ex ⇒ erlang_eval catch_expr (extend_env env (map extract_var_name (get_annotated_variables catch_vars)) (Exception ex))
+    | UndefinedBehaviour ⇒ UndefinedBehaviour)" |
+
   "erlang_eval (SingleExp (FuncNameExpr _) _) env = undefined"|
-  "erlang_eval (SingleExp (LetExpr (ErlangLet (Variable _) _ _)) _) env = undefined"|
+
   "erlang_eval (SingleExp (FunExpr _) _) env = undefined"|
   "erlang_eval (SingleExp (LetRecExpr _ _) _) env = undefined"|
   "erlang_eval (SingleExp (AppExpr _ _) _)env = undefined"|
   "erlang_eval (SingleExp (InterModuleCallExpr _ _ _) _) env = undefined"|
-  "erlang_eval (SingleExp (PrimOpCallExpr _ _ _) _) env = undefined"|
-  "erlang_eval (SingleExp (TryExpr _ _ _ _ _) _) env = undefined   "|
+  "erlang_eval (SingleExp (PrimOpCallExpr _ _ _) _) env = undefined"|(*could be left undefined *)
+
   "erlang_eval (SingleExp (ReceiveExpr _ _ _) _) env = undefined   "|
   "erlang_eval (SingleExp (SequencingExpr _ _ ) _) env = undefined"|
   "erlang_eval (SingleExp (CatchExpr _) _) env = undefined"
   sorry
 termination erlang_eval
   sorry
-(*
-  "erlang_eval  (SingleExp (AppExpr f_expr arg_exprs)_) env = 
-     (case erlang_eval f_expr env of
-        Result [Closure params body f_env] ⇒ 
-          (if length params = length arg_exprs then
-             let arg_results = map (λarg. erlang_eval arg env) arg_exprs;
-                 combined_results = sequence_results arg_results
-             in case combined_results of
-                  Result args ⇒ erlang_eval body (extend_env f_env params args)
-                | _ ⇒ combined_results
-           else UndefinedBehaviour)
-      | Result _ ⇒ UndefinedBehaviour
-      | exp ⇒ exp)"
-*)
 
-(*
-fun erlang_eval :: "expression => env ⇒ result " where
-"erlang_eval (SingleExp(AtomicLitExpr atom ) _) env  =  (Result [AtomicValue atom] ) " |
-"erlang_eval (ValueListExp (ValueList exps _)  _) =  erlang_eval (SingleExp ex  _) @ erlang_eval(ValueListExp (ValueList exps _)  _)" 
-*)
+
 
 (**)
 
