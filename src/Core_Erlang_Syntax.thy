@@ -147,7 +147,7 @@ and single_expression = AtomicLitExpr atomic_literal
                       | LetRecExpr "function_definition list" expression
                       | AppExpr  expression "expression list"
                       | InterModuleCallExpr  expression expression  "expression list"
-                      | PrimOpCallExpr  string atom  "expression list"
+                      | PrimOpCallExpr  atom  "expression list"
                       | TryExpr  expression variables expression variables expression
                       | ReceiveExpr  "annotated_clause list" expression expression
                       | SequencingExpr expression expression
@@ -264,14 +264,46 @@ fun digit_to_nat :: "digit ⇒ nat" where
 | "digit_to_nat Eight = 8"
 | "digit_to_nat Nine = 9"
 
+(* Helper function to compute the value of a non-empty list of digits, given their place value. *)
+fun nonemptylist_to_nat_acc :: "digit nonemptylist ⇒ nat ⇒ nat" where
+  "nonemptylist_to_nat_acc (Nonemptylist num []) place_value = digit_to_nat num * place_value"
+| "nonemptylist_to_nat_acc (Nonemptylist num (dig # ds)) place_value = 
+     digit_to_nat num * place_value + nonemptylist_to_nat_acc (Nonemptylist dig ds) (place_value div 10)"
+
+(* Main function to compute the natural number from a non-empty list of digits. *)
 fun nonemptylist_to_nat :: "digit nonemptylist ⇒ nat" where
-  "nonemptylist_to_nat (Nonemptylist num []) = digit_to_nat num"
-| "nonemptylist_to_nat (Nonemptylist num ds) = digit_to_nat num * 10 + nonemptylist_to_nat (Nonemptylist (hd ds) (tl ds))"
+  "nonemptylist_to_nat digits = 
+     nonemptylist_to_nat_acc digits (10 ^ (length (case digits of Nonemptylist _ ds ⇒ ds)))"
 
 fun integer_to_nat :: "integer ⇒ nat" where
   "integer_to_nat (Integer (Some Plus) ds) = nonemptylist_to_nat ds"
 | "integer_to_nat (Integer (Some Minus) ds) =  nonemptylist_to_nat ds"
 | "integer_to_nat (Integer None ds) = nonemptylist_to_nat ds"
+
+fun nat_to_digit :: "nat ⇒ digit" where
+  "nat_to_digit num = (if num = 0 then Zero else
+                    if num = 1 then One else
+                    if num = 2 then Two else
+                    if num = 3 then Three else
+                    if num = 4 then Four else
+                    if num = 5 then Five else
+                    if num = 6 then Six else
+                    if num = 7 then Seven else
+                    if num = 8 then Eight else
+                    if num = 9 then Nine else undefined)"
+
+fun nat_to_nonemptylist :: "nat ⇒ digit nonemptylist" where
+  "nat_to_nonemptylist num =
+    (if num < 10 then Nonemptylist (nat_to_digit num) []
+     else let q = num div 10;
+              r = num mod 10
+          in case nat_to_nonemptylist q of
+               Nonemptylist head tail ⇒ Nonemptylist head (tail @ [nat_to_digit r]))"
+
+
+fun nat_to_integer :: "nat ⇒ integer" where
+  "nat_to_integer num = Integer None (nat_to_nonemptylist num)"
+
 
 
 fun get_arity :: "function_definition ⇒ integer" where
@@ -488,23 +520,37 @@ fun validate_clause :: "annotated_clause ⇒ bool" where
 "validate_clause (Clause ps (When guard) body annotation) = 
   ((is_valid_clause_pattern((Clause ps (When guard) body annotation )) ∧ is_valid_guard guard ∧ is_valid_bitstring_pattern_expression body))"
 
+
+
+
+
 section ‹Dynamic Semantics›
 (* To be checked: vars are not considered values? lists and tuples could be included *)
 
-(*Update: add another constructor of type exception Value could be exception*)
-
 datatype exception = Error prim_op_call | Exit prim_op_call | Throw prim_op_call
 
-datatype erlang_value =  AtomicValue atomic_literal |ExceptionValue exception 
- (* | ListValue "erlang_value list" |TupleValue  "erlang_value list" | BitStringValue  "erlang_value list" 
-*)
+datatype name = VarName variable_name | FuncName function_name
+
+datatype erlang_value = 
+    AtomicValue atomic_literal 
+  | ExceptionValue exception 
+  | ClosureValue closure 
+  | ListValue "erlang_value list" 
+  | TupleValue "erlang_value list" 
+  | MapValue "(erlang_value * erlang_value) list"
+
+and env_entry = EnvValue erlang_value | EnvClosure closure
+and env = Env "(name * env_entry) list"
+
+and closure = Closure "variable_name list" expression env
+
+type_synonym closures =  "(name * env) list"
+                
+datatype prim_op = AddOp | MulOp | SubOp| DivOp| EqualOp
+
+datatype result = Result  "erlang_value list"  | UndefinedBehaviour  "env option" "closures option" 
 
 
-(*Update: remove construct Exception *)
-datatype result = Result  "erlang_value list"  | UndefinedBehaviour 
-
-(*double check the representation *)
-type_synonym env = "variable_name ⇒ erlang_value option"
 
 (*Helper functions for lists & value_lists*)
 
@@ -512,39 +558,37 @@ fun is_value_result :: "result ⇒ bool" where
 "is_value_result (Result [AtomicValue _]) = True" |
 "is_value_result _ = False"
 
-
 fun get_value_from_result :: "result ⇒ erlang_value" where
 "get_value_from_result (Result [val]) = val" |
 "get_value_from_result _ = undefined"
 
-(*
-fun is_exception :: "result  ⇒ bool" where
-"is_exception (Result ((ExceptionValue _)#vals) =  " |
-"is_exception _ = False"
-*)
-
 fun is_exception_value :: "erlang_value ⇒ bool" where
   "is_exception_value (ExceptionValue _) = True" |
- (* "is_exception_value (ListValue vals) = (∃v ∈ set vals. is_exception_value v)" |
-  "is_exception_value (TupleValue vals) = (∃v ∈ set vals. is_exception_value v)" |*)
   "is_exception_value _ = False"
 
+(*use *list_ex
+  (∃v ∈ set vals. is_exception_value v)
+*)
 fun is_exception :: "result ⇒ bool" where
-  "is_exception (Result vals) = (∃v ∈ set vals. is_exception_value v)" |
-  "is_exception UndefinedBehaviour = False"
+  "is_exception (Result vals) = (if list_ex is_exception_value vals then True else False)" |
+  "is_exception (UndefinedBehaviour _ _) = False"
 
 
 fun get_exception :: "result list ⇒ result" where
 "get_exception (ex#results) = (if is_exception ex then ex else get_exception results)" |
-"get_exception [] = UndefinedBehaviour"
-(*
+"get_exception [] = (UndefinedBehaviour None None )"
+
 fun is_undefined :: "result ⇒ bool" where
-"is_undefined (UndefinedBehaviour) = True" |
-"is_undefined _ = False"*)
+"is_undefined ((UndefinedBehaviour _  _)) = True" |
+"is_undefined _ = False"
+
+fun get_undefined :: "result list ⇒ result" where
+"get_undefined (res#results) = (if is_undefined res then res else get_undefined results)" |
+"get_undefined [] = (UndefinedBehaviour None  None)"
 
 (*return undefined behaviour if it occurs at any point*)
 fun handle_exceptions_or_undefined :: "result list ⇒ result" where
-"handle_exceptions_or_undefined results =(if (UndefinedBehaviour \<in> set results) then UndefinedBehaviour
+" handle_exceptions_or_undefined results =(if list_ex is_undefined results then (get_undefined results)
                                             else get_exception results )"
 
 fun result_to_value_list :: "result ⇒ erlang_value list" where
@@ -557,14 +601,28 @@ fun sequence_results :: "result list ⇒ result" where
                             else handle_exceptions_or_undefined results)"
 
 (*Helper function for let*)
-(*could be improved by having a list of pairs *)
-fun extend_env :: "env ⇒ variable_name list ⇒ result ⇒ env" where  
-"extend_env env [] (Result []) = env" |
-"extend_env env (var#vars) (Result ((AtomicValue atom) # vals)) =
-  (λx. if x = var then Some (AtomicValue atom) else extend_env env vars (Result vals) x)" |
-"extend_env env [var] (Result [ExceptionValue ex]) =
-  (λx. if x = var then Some (ExceptionValue ex) else env x)" |
-"extend_env _ _ _ = undefined"
+
+(* Lookup an entry in the environment *)
+fun lookup_env :: "env ⇒ name ⇒ env_entry option" where
+  "lookup_env (Env []) _ = None" |
+  "lookup_env (Env ((envName, entry) # env)) name = (if envName = name then Some entry else lookup_env (Env env) name)"
+
+fun lookup_closure_env :: "closures ⇒ name ⇒ env option" where
+  "lookup_closure_env [] _ = None" |
+  "lookup_closure_env ((envName, env) # closures) name = (if envName = name then Some env else lookup_closure_env closures name)"
+
+
+(* Extend the environment with new variable-value bindings *)
+fun extend_env :: "env ⇒ name list ⇒ erlang_value list ⇒ env" where
+  "extend_env (Env env) [] [] = Env env" |
+  "extend_env (Env env) (name#ns) (val#vals) =
+    Env ((name, EnvValue val) # (case extend_env (Env env) ns vals of Env env' ⇒ env'))" |
+  "extend_env _ _ _ = undefined"
+
+(* Extend the environment with new function-closure bindings *)
+fun extend_env_with_closure :: "env ⇒ name ⇒ closure ⇒ env" where
+  "extend_env_with_closure (Env env) name closure =
+     Env ((name, EnvClosure closure) # env)"
 
 
 (*pattern matching helpers *)
@@ -577,52 +635,56 @@ fun match_atomic :: "atomic_literal ⇒ erlang_value ⇒ bool" where
 "match_atomic _ _ = False"
 
 
+(*ToDo: check matching lists and tuples*)
 
-
-(*ToDo: implement match_bit_string*)
 fun match_pattern :: "annotated_pattern list ⇒ erlang_value list ⇒ env ⇒ env option" where
+  "match_pattern [] [] env = Some env" |
 
-"match_pattern [] [] env = Some env" |
+  "match_pattern ([AnnotatedVarPattern (AnnotatedVarName var)]) [val] env =
+    Some (extend_env env [VarName var] [val])" |
 
-"match_pattern ([AnnotatedVarPattern (AnnotatedVarName var)]) [val] env = Some(env(var ↦ val))" |
+  "match_pattern ([AnnotatedPatern (AtomicLitPat lit)]) [val] env =
+    (if match_atomic lit val then Some env else None)" |
 
-"match_pattern ([AnnotatedPatern (AtomicLitPat lit)])  [val] env =
-   (if match_atomic lit val then Some env else None)" |
-
-"match_pattern ([AnnotatedPatern (TuplePat (pat#pats))]) (val#vals) env =
-   (case match_pattern [pat] [val] env of
+  "match_pattern ([AnnotatedPatern (TuplePat (pat#pats))]) (val#vals) env =
+    (case match_pattern [pat] [val] env of
       Some env' ⇒ match_pattern pats vals env'
     | None ⇒ None)" |
-"match_pattern ([AnnotatedPatern(ListPat( pat#pats))]) ( val#vals) env =
-   (case match_pattern [pat] [val] env of
+
+  "match_pattern ([AnnotatedPatern (ListPat (pat#pats))]) (val#vals) env =
+    (case match_pattern [pat] [val] env of
       Some env' ⇒ match_pattern pats vals env'
     | None ⇒ None)" |
-"match_pattern ([AnnotatedPatern(BitstringPat (pat#pats))]) (bval # vals) env =
-   (case match_pattern [pat] [bval] env of
+
+  "match_pattern ([AnnotatedPatern (BitstringPat (pat#pats))]) (bval # vals) env =
+    (case match_pattern [pat] [bval] env of
       Some env' ⇒ match_pattern pats vals env'
     | None ⇒ None)" |
-"match_pattern ([AnnotatedPatern (ListPatWithTail (pat#pats) pat2)]) (val # vals) env =
-   (case match_pattern [pat] [val] env of
-      Some env' ⇒ match_pattern (pats@[pat2]) vals env'
+
+  "match_pattern ([AnnotatedPatern (ListPatWithTail (pat#pats) pat2)]) (val # vals) env =
+    (case match_pattern [pat] [val] env of
+      Some env' ⇒ match_pattern (pats @ [pat2]) vals env'
     | None ⇒ None)" |
-"match_pattern _ _ _ = None"
+
+  "match_pattern _ _ _ = None"
+
+
 
 datatype select_case_result = 
     ClauseMatched "env * guard * expression" 
   | NoMatch
 
 
-fun select_case :: "erlang_value list ⇒ annotated_clause  ⇒ env ⇒ select_case_result" where
+fun select_case :: "erlang_value list ⇒ annotated_clause ⇒ env ⇒ select_case_result" where
+  "select_case case_values (Clause (Pattern patt) guard body _) env =
+    (case match_pattern [patt] case_values env of
+      Some env' ⇒ ClauseMatched (env', guard, body)
+    | None ⇒ NoMatch)" |
 
-"select_case case_values (Clause (Pattern patt)  guard body _)  env =
-  (case match_pattern [patt] case_values env of
-     Some env' ⇒ ClauseMatched (env', guard, body)
-   | None ⇒NoMatch)"|
-
-"select_case case_values (Clause (PatternsList patts)  guard body _)  env =
-  (case match_pattern patts case_values env of
-     Some env' ⇒ ClauseMatched (env', guard, body)
-   | None ⇒NoMatch)"
+  "select_case case_values (Clause (PatternsList patts) guard body _) env =
+    (case match_pattern patts case_values env of
+      Some env' ⇒ ClauseMatched (env', guard, body)
+    | None ⇒ NoMatch)"
 
 
 fun get_annotated_variables ::" variables  ⇒ annotated_variable_name list" where
@@ -632,137 +694,812 @@ fun get_annotated_variables ::" variables  ⇒ annotated_variable_name list" whe
 
 (*Closure*)
 
-datatype closure = Closure "variable_name list" expression env
+
 
 fun create_closure :: "variable_name list ⇒ expression ⇒ env ⇒ closure" where
-"create_closure params body env = Closure params body env"
+  "create_closure params body env = Closure params body env"
 
-fun extend_env_with_closure :: "env ⇒ function_name ⇒ closure ⇒ env" where
-"extend_env_with_closure env fname closure = (λx. if x = fname then Some (AtomicValue (ClosureValue closure)) else env x)"
+fun get_env_list :: "env  ⇒ (name * env_entry) list " where
+"get_env_list (Env env) = env"
 
 
+(* PrimeOpCall add, mult, and div *)
+abbreviation add_atom :: atom where
+  "add_atom ≡ Atom [InputChar (CHR ''a''), InputChar (CHR ''d''), InputChar (CHR ''d'')]"
 
-function erlang_eval :: "expression ⇒ env ⇒ result" where
-  "erlang_eval (SingleExp (AtomicLitExpr lit) _) _ = Result [AtomicValue lit]" |
+abbreviation sub_atom :: atom where
+  "sub_atom ≡ Atom [InputChar (CHR ''s''), InputChar (CHR ''u''), InputChar (CHR ''b'')]"
 
-  "erlang_eval (SingleExp (VarNameExpr var) _) env =
-     (case env var of
-        Some val ⇒ Result [val]
-      | None ⇒ UndefinedBehaviour)" |
+abbreviation div_atom :: atom where
+  "div_atom ≡ Atom [InputChar (CHR ''d''), InputChar (CHR ''i''), InputChar (CHR ''v'')]"
 
-  "erlang_eval (ValueListExp (ValueList exps _) _) env =
-     (let vals = map (λe. erlang_eval (SingleExp e None) env) exps in
-      if list_all is_value_result vals then
-        Result (map get_value_from_result vals)
-      else
-        handle_exceptions_or_undefined vals)" |
+abbreviation mul_atom :: atom where
+  "mul_atom ≡ Atom [InputChar (CHR ''m''), InputChar (CHR ''u''), InputChar (CHR ''l'')]"
 
-  "erlang_eval (SingleExp (TupleExpr (Tuple exps)) _) env =
-     (let vals = map (λe. erlang_eval e env) exps in
-      if list_all is_value_result vals then
-        Result (map get_value_from_result vals)
-      else
-        handle_exceptions_or_undefined vals)" |
+abbreviation equal_atom :: atom where
+  "equal_atom ≡ Atom [InputChar (CHR ''e''), InputChar (CHR ''q''), InputChar (CHR ''u''), InputChar (CHR ''a''), InputChar (CHR ''l'')]"
 
-  "erlang_eval (SingleExp (ListExpr (List (Nonemptylist exp exps))) _) env =
-     (let vals = map (λe. erlang_eval e env) (exp # exps) in
-      if list_all is_value_result vals then
-        Result (map get_value_from_result vals)
-      else
-        handle_exceptions_or_undefined vals)" |
 
-  "erlang_eval (SingleExp (ListExpr (ListWithTail (Nonemptylist exp1 exps) exp2)) _) env =
-     (let vals = map (λe. erlang_eval e env) (exp1 # exps @ [exp2]) in
-      if list_all is_value_result vals then
-        Result (map get_value_from_result vals)
-      else
-        handle_exceptions_or_undefined vals)" |
+(* Add two integers *)
+fun add_integers :: "erlang_value list ⇒ erlang_value option" where
+  "add_integers [AtomicValue (IntegerLiteral (Integer sign1 (Nonemptylist d1 ds1))), 
+                 AtomicValue (IntegerLiteral (Integer sign2 (Nonemptylist d2 ds2)))] = 
+    (let n1 = (case sign1 of None ⇒ int (nonemptylist_to_nat (Nonemptylist d1 ds1)) 
+                            | Some Plus ⇒ int (nonemptylist_to_nat (Nonemptylist d1 ds1)) 
+                            | Some Minus ⇒ - int (nonemptylist_to_nat (Nonemptylist d1 ds1)));
+         n2 = (case sign2 of None ⇒ int (nonemptylist_to_nat (Nonemptylist d2 ds2)) 
+                            | Some Plus ⇒ int (nonemptylist_to_nat (Nonemptylist d2 ds2)) 
+                            | Some Minus ⇒ - int (nonemptylist_to_nat (Nonemptylist d2 ds2)));
+         sum = n1 + n2;
+         sign = (if sum < 0 then Some Minus else if sum = 0 then None else Some Plus);
+         abs_sum = nat (abs sum)
+     in Some (AtomicValue (IntegerLiteral (Integer sign (nat_to_nonemptylist abs_sum)))))" |
+  "add_integers _ = None"
 
-  "erlang_eval (SingleExp (BinaryExp bitstr) _) env = undefined" |
+(* Multiply two integers *)
+fun mul_integers :: "erlang_value list ⇒ erlang_value option" where
+  "mul_integers [AtomicValue (IntegerLiteral (Integer sign1 (Nonemptylist d1 ds1))), 
+                 AtomicValue (IntegerLiteral (Integer sign2 (Nonemptylist d2 ds2)))] = 
+    (let n1 = (case sign1 of None ⇒ int (nonemptylist_to_nat (Nonemptylist d1 ds1)) 
+                            | Some Plus ⇒ int (nonemptylist_to_nat (Nonemptylist d1 ds1)) 
+                            | Some Minus ⇒ - int (nonemptylist_to_nat (Nonemptylist d1 ds1)));
+         n2 = (case sign2 of None ⇒ int (nonemptylist_to_nat (Nonemptylist d2 ds2)) 
+                            | Some Plus ⇒ int (nonemptylist_to_nat (Nonemptylist d2 ds2)) 
+                            | Some Minus ⇒ - int (nonemptylist_to_nat (Nonemptylist d2 ds2)));
+         prod = n1 * n2;
+         sign = (if prod < 0 then Some Minus else if prod = 0 then None else Some Plus);
+         abs_prod = nat (abs prod)
+     in Some (AtomicValue (IntegerLiteral (Integer sign (nat_to_nonemptylist abs_prod)))))" |
+  "mul_integers _ = None"
 
-  "erlang_eval (SingleExp (LetExpr (ErlangLet (VariablesList vars) e1 e2)) _) env =
-     (case erlang_eval e1 env of
-        Result [AtomicValue atom] ⇒
-          if length vars = 1 then
-            erlang_eval e2 (extend_env env (extract_var_name_list (VariablesList vars)) (Result [AtomicValue atom]))
-          else
-            UndefinedBehaviour
-      | Result ((AtomicValue atom) # vals) ⇒
+(* Divide two integers *)
+fun div_integers :: "erlang_value list ⇒ erlang_value option" where
+  "div_integers [AtomicValue (IntegerLiteral (Integer sign1 (Nonemptylist d1 ds1))), 
+                 AtomicValue (IntegerLiteral (Integer sign2 (Nonemptylist d2 ds2)))] = 
+    (let n1 = (case sign1 of None ⇒ int (nonemptylist_to_nat (Nonemptylist d1 ds1)) 
+                            | Some Plus ⇒ int (nonemptylist_to_nat (Nonemptylist d1 ds1)) 
+                            | Some Minus ⇒ - int (nonemptylist_to_nat (Nonemptylist d1 ds1)));
+         n2 = (case sign2 of None ⇒ int (nonemptylist_to_nat (Nonemptylist d2 ds2)) 
+                            | Some Plus ⇒ int (nonemptylist_to_nat (Nonemptylist d2 ds2)) 
+                            | Some Minus ⇒ - int (nonemptylist_to_nat (Nonemptylist d2 ds2)));
+         quotient = (if n2 ≠ 0 then n1 div n2 else 0);
+         sign = (if quotient < 0 then Some Minus else if quotient = 0 then None else Some Plus);
+         abs_quotient = nat (abs quotient)
+     in (if n2 ≠ 0 then Some (AtomicValue (IntegerLiteral (Integer sign (nat_to_nonemptylist abs_quotient)))) else None))" |
+  "div_integers _ = None"
+
+(* Subtract two integers *)
+fun sub_integers :: "erlang_value list ⇒ erlang_value option" where
+  "sub_integers [AtomicValue (IntegerLiteral (Integer sign1 (Nonemptylist d1 ds1))), 
+                 AtomicValue (IntegerLiteral (Integer sign2 (Nonemptylist d2 ds2)))] = 
+    (let n1 = (case sign1 of None ⇒ int (nonemptylist_to_nat (Nonemptylist d1 ds1)) 
+                            | Some Plus ⇒ int (nonemptylist_to_nat (Nonemptylist d1 ds1)) 
+                            | Some Minus ⇒ - int (nonemptylist_to_nat (Nonemptylist d1 ds1)));
+         n2 = (case sign2 of None ⇒ int (nonemptylist_to_nat (Nonemptylist d2 ds2)) 
+                            | Some Plus ⇒ int (nonemptylist_to_nat (Nonemptylist d2 ds2)) 
+                            | Some Minus ⇒ - int (nonemptylist_to_nat (Nonemptylist d2 ds2)));
+         diff = n1 - n2;
+         sign = (if diff < 0 then Some Minus else if diff = 0 then None else Some Plus);
+         abs_diff = nat (abs diff)
+     in Some (AtomicValue (IntegerLiteral (Integer sign (nat_to_nonemptylist abs_diff)))))" |
+  "sub_integers _ = None"
+
+(* Check if two integers are equal *)
+fun equal_integers :: "erlang_value list ⇒ erlang_value option" where
+  "equal_integers [AtomicValue (IntegerLiteral (Integer sign1 (Nonemptylist d1 ds1))), 
+                   AtomicValue (IntegerLiteral (Integer sign2 (Nonemptylist d2 ds2)))] = 
+    (let n1 = (case sign1 of None ⇒ int (nonemptylist_to_nat (Nonemptylist d1 ds1)) 
+                            | Some Plus ⇒ int (nonemptylist_to_nat (Nonemptylist d1 ds1)) 
+                            | Some Minus ⇒ - int (nonemptylist_to_nat (Nonemptylist d1 ds1)));
+         n2 = (case sign2 of None ⇒ int (nonemptylist_to_nat (Nonemptylist d2 ds2)) 
+                            | Some Plus ⇒ int (nonemptylist_to_nat (Nonemptylist d2 ds2)) 
+                            | Some Minus ⇒ - int (nonemptylist_to_nat (Nonemptylist d2 ds2)));
+         is_equal = (n1 = n2)
+     in if is_equal then Some (AtomicValue (AtomLiteral true)) 
+                    else Some (AtomicValue (AtomLiteral  false))
+    )" |
+  "equal_integers _ = None"
+
+(* Evaluate primitive operations *)
+
+fun eval_prim_op :: "prim_op ⇒ erlang_value list ⇒ erlang_value option" where
+  "eval_prim_op AddOp args = add_integers args" |
+  "eval_prim_op SubOp args = sub_integers args" |
+  "eval_prim_op MulOp args = mul_integers args" |
+  "eval_prim_op DivOp args = div_integers args" |
+  "eval_prim_op EqualOp args = equal_integers args" 
+
+
+(* Debugging functions *)
+abbreviation zero :: integer where
+  "zero ≡ Integer None (Nonemptylist Zero [])"
+
+abbreviation one :: integer where
+  "one ≡ Integer None (Nonemptylist One [])"
+
+abbreviation three :: integer where
+  "three ≡ Integer None (Nonemptylist Three [])"
+
+abbreviation nine :: integer where
+  "nine ≡ Integer None (Nonemptylist Nine [Nine])"
+
+abbreviation eight :: integer where
+  "eight ≡ Integer None (Nonemptylist Eight [Eight])"
+
+abbreviation seven :: integer where
+  "seven ≡ Integer None (Nonemptylist Seven [Seven])"
+
+(* Debugging functions *)
+
+function erlang_eval :: "expression ⇒ env ⇒ closures ⇒ result" where
+  "erlang_eval (SingleExp (AtomicLitExpr lit)_) env closures = Result [AtomicValue lit]" |
+  
+  "erlang_eval (SingleExp (VarNameExpr var)_) env closures = 
+     (case lookup_env env (VarName var) of
+        Some (EnvValue val) ⇒ Result [val]
+      | _ ⇒ (UndefinedBehaviour (Some env) (Some closures)))" |
+
+  "erlang_eval (ValueListExp (ValueList exps _)  _) env closures = 
+     (let vals = map (λe. erlang_eval (SingleExp e None) env closures) exps in
+      if (list_all is_value_result vals) then Result (map get_value_from_result vals)
+      else handle_exceptions_or_undefined vals)" |
+
+  "erlang_eval (SingleExp(TupleExpr (Tuple exps))_) env closures = 
+     (let vals = map (λe. erlang_eval e env closures) exps in
+      if (list_all is_value_result vals) then Result (map get_value_from_result vals)
+      else handle_exceptions_or_undefined vals)" |
+
+  "erlang_eval  (SingleExp (ListExpr (List(Nonemptylist exp exps)))_) env closures = 
+     (let vals = map (λe. erlang_eval e env closures) (exp#exps) in
+      if (list_all is_value_result vals) then Result (map get_value_from_result vals)
+      else handle_exceptions_or_undefined vals)" |
+
+  "erlang_eval  (SingleExp (ListExpr (ListWithTail(Nonemptylist exp1 exps) exp2 ))_) env closures = 
+     (let vals = map (λe. erlang_eval e env closures) (exp1#exps @ [exp2]) in
+      if (list_all is_value_result vals) then Result (map get_value_from_result vals)
+      else handle_exceptions_or_undefined vals)"  |
+
+  "erlang_eval  (SingleExp (BinaryExp bitstr) _) env closures = undefined" |
+
+  "erlang_eval (SingleExp (LetExpr (ErlangLet (VariablesList vars) e1 e2)) _) env closures =
+     (case erlang_eval e1 env closures of
+         Result ((AtomicValue atom) # vals) ⇒ 
           if length ((AtomicValue atom) # vals) = length vars then
-            erlang_eval e2 (extend_env env (extract_var_name_list (VariablesList vars)) (Result ((AtomicValue atom) # vals)))
-          else
-            UndefinedBehaviour
+            erlang_eval e2 (extend_env env (map VarName (map extract_var_name (get_annotated_variables (VariablesList vars)))) ((AtomicValue atom) # vals)) closures
+          else (UndefinedBehaviour (Some env) (Some closures) )
       | Result [ExceptionValue ex] ⇒ Result [ExceptionValue ex]
-      | UndefinedBehaviour ⇒ UndefinedBehaviour)" |
+      | (UndefinedBehaviour en clos ) ⇒ (UndefinedBehaviour en clos ))" |
 
-  "erlang_eval (SingleExp (LetExpr (ErlangLet (Variable var) e1 e2)) _) env =
-     (case erlang_eval e1 env of
+  "erlang_eval (SingleExp (LetExpr (ErlangLet (Variable var) e1 e2)) _) env closures =
+     (case erlang_eval e1 env closures of
         Result [AtomicValue atom] ⇒
-          erlang_eval e2 (extend_env env (extract_var_name_list (VariablesList [var])) (Result [AtomicValue atom]))
+          erlang_eval e2 (extend_env env [VarName (extract_var_name var)] [AtomicValue atom]) closures
       | Result [ExceptionValue ex] ⇒ Result [ExceptionValue ex]
-      | UndefinedBehaviour ⇒ UndefinedBehaviour)" |
+      | (UndefinedBehaviour en clos ) ⇒ (UndefinedBehaviour en clos ))" |
 
-  "erlang_eval (SingleExp (CaseExpr (ErlangCase switch_expr [])) _) env = UndefinedBehaviour" |
+  "erlang_eval (SingleExp (CaseExpr (ErlangCase switch_expr [])) _) env closures = (UndefinedBehaviour (Some env) (Some closures)  )" |
 
-  "erlang_eval (SingleExp (CaseExpr (ErlangCase switch_expr (cl # clauses))) _) env =
-     (case erlang_eval switch_expr env of
-        Result [AtomicValue atom] ⇒
-          (case select_case [AtomicValue atom] cl env of
-             ClauseMatched (env', When guard, body) ⇒
-               (case erlang_eval guard env' of
-                  Result [AtomicValue (AtomLiteral true)] ⇒ erlang_eval body env'
-                | Result [AtomicValue (AtomLiteral false)] ⇒ erlang_eval (SingleExp (CaseExpr (ErlangCase switch_expr clauses)) None) env
-                | Result [ExceptionValue ex] ⇒ Result [ExceptionValue ex]
-                | UndefinedBehaviour ⇒ UndefinedBehaviour)
-           | NoMatch ⇒ erlang_eval (SingleExp (CaseExpr (ErlangCase switch_expr clauses)) None) env)
-      | Result ((AtomicValue atom) # vals) ⇒
+  "erlang_eval (SingleExp (CaseExpr (ErlangCase switch_expr (cl # clauses))) _) env closures =
+     (case erlang_eval switch_expr env closures of
+        Result ((AtomicValue atom) # vals) ⇒ 
           (case select_case ((AtomicValue atom) # vals) cl env of
              ClauseMatched (env', When guard, body) ⇒
-               (case erlang_eval guard env' of
-                  Result [AtomicValue (AtomLiteral true)] ⇒ erlang_eval body env'
-                | Result [AtomicValue (AtomLiteral false)] ⇒ erlang_eval (SingleExp (CaseExpr (ErlangCase switch_expr clauses)) None) env
+               (case erlang_eval guard env' closures of
+                  Result [AtomicValue (AtomLiteral true)] ⇒ erlang_eval body env' closures
+                | Result [AtomicValue (AtomLiteral false)] ⇒ 
+                    erlang_eval (SingleExp (CaseExpr (ErlangCase switch_expr clauses)) None) env closures
                 | Result [ExceptionValue ex] ⇒ Result [ExceptionValue ex]
-                | UndefinedBehaviour ⇒ UndefinedBehaviour)
-           | NoMatch ⇒ erlang_eval (SingleExp (CaseExpr (ErlangCase switch_expr clauses)) None) env)
+                | (UndefinedBehaviour en clos ) ⇒ (UndefinedBehaviour en clos))
+           | NoMatch ⇒ erlang_eval (SingleExp (CaseExpr (ErlangCase switch_expr clauses)) None) env closures)
       | Result [ExceptionValue ex] ⇒ Result [ExceptionValue ex]
-      | UndefinedBehaviour ⇒ UndefinedBehaviour)" |
+      | (UndefinedBehaviour en clos ) ⇒ (UndefinedBehaviour en clos ))" |
 
-  "erlang_eval (SingleExp (TryExpr expr vars try_expr catch_vars catch_expr) _) env =
-     (case erlang_eval expr env of
-        Result [AtomicValue atom] ⇒
-          (case erlang_eval try_expr (extend_env env (map extract_var_name (get_annotated_variables vars)) (Result [AtomicValue atom])) of
+  "erlang_eval (SingleExp (TryExpr expr vars try_expr catch_vars catch_expr) _) env closures =
+     (case erlang_eval expr env closures of
+        Result ((AtomicValue atom) # vals) ⇒ 
+          (case erlang_eval try_expr (extend_env env (map VarName (map extract_var_name (get_annotated_variables vars))) ((AtomicValue atom) # vals)) closures of
              Result [AtomicValue atom] ⇒ Result [AtomicValue atom]
            | Result ((AtomicValue atom) # vals) ⇒ Result ((AtomicValue atom) # vals)
-           | Result [ExceptionValue ex] ⇒
-               erlang_eval catch_expr (extend_env env (map extract_var_name (get_annotated_variables catch_vars)) (Result [ExceptionValue ex]))
-           | UndefinedBehaviour ⇒ UndefinedBehaviour)
-      | Result ((AtomicValue atom) # vals) ⇒
-          (case erlang_eval try_expr (extend_env env (map extract_var_name (get_annotated_variables vars)) (Result ((AtomicValue atom) # vals))) of
-             Result [AtomicValue atom] ⇒ Result [AtomicValue atom]
-           | Result ((AtomicValue atom) # vals) ⇒ Result ((AtomicValue atom) # vals)
-           | Result [ExceptionValue ex] ⇒
-               erlang_eval catch_expr (extend_env env (map extract_var_name (get_annotated_variables catch_vars)) (Result [ExceptionValue ex]))
-           | UndefinedBehaviour ⇒ UndefinedBehaviour)
-      | Result [ExceptionValue ex] ⇒ Result [ExceptionValue ex]
-      | UndefinedBehaviour ⇒ UndefinedBehaviour)" |
+           | Result [ExceptionValue ex] ⇒ 
+               erlang_eval catch_expr (extend_env env (map VarName (map extract_var_name (get_annotated_variables catch_vars))) [ExceptionValue ex]) closures
+           | (UndefinedBehaviour en clos ) ⇒ (UndefinedBehaviour en clos ))
+      | Result [ExceptionValue ex] ⇒ 
+          erlang_eval catch_expr (extend_env env (map VarName (map extract_var_name (get_annotated_variables catch_vars))) [ExceptionValue ex]) closures
+      | (UndefinedBehaviour en clos ) ⇒ (UndefinedBehaviour en clos ))" |
 
-  "erlang_eval (SingleExp (FuncNameExpr _) _) env = undefined" |
+  "erlang_eval (SingleExp (FuncNameExpr func_name) _) env closures = 
+     (case lookup_env env (FuncName func_name) of
+        Some (EnvClosure closure) ⇒ Result [ClosureValue closure]
+      | _ ⇒ (UndefinedBehaviour (Some env)(Some closures) ))" |
 
-  "erlang_eval (SingleExp (FunExpr _) _) env = undefined" |
-  "erlang_eval (SingleExp (LetRecExpr _ _) _) env = undefined" |
-  "erlang_eval (SingleExp (AppExpr _ _) _) env = undefined" |
-  "erlang_eval (SingleExp (InterModuleCallExpr _ _ _) _) env = undefined" |
-  "erlang_eval (SingleExp (PrimOpCallExpr _ _ _) _) env = undefined" |
-  "erlang_eval (SingleExp (ReceiveExpr _ _ _) _) env = undefined" |
-  "erlang_eval (SingleExp (SequencingExpr _ _ ) _) env = undefined" |
-  "erlang_eval (SingleExp (CatchExpr _) _) env = undefined"
+  "erlang_eval (SingleExp (FunExpr (Func params body)) _) env closures = 
+     Result [ClosureValue (create_closure (map extract_var_name params) body env)]" |
+
+  "erlang_eval (SingleExp (AppExpr (SingleExp (FuncNameExpr func_name) _) arg_exprs) _) appenv closures = 
+     ( let env = (case (lookup_closure_env closures  (FuncName func_name))  of Some (Env en) ⇒ Env en | _ ⇒  appenv) in
+		(case erlang_eval (SingleExp (FuncNameExpr func_name) None) env closures of
+			Result [ClosureValue (Closure params body closure_env)] ⇒
+			if length params = length arg_exprs then
+				let arg_vals = map (λarg. case erlang_eval arg appenv closures of Result [val] ⇒ val | _ ⇒ undefined) arg_exprs in
+				erlang_eval body (extend_env closure_env (map VarName params) arg_vals) closures
+			else  ( UndefinedBehaviour (Some env) (Some closures))
+		| _ ⇒ ( UndefinedBehaviour (Some env) (Some closures))))" |
+
+  "erlang_eval (SingleExp (CatchExpr expr) _) env closures = 
+     (case erlang_eval expr env closures of
+        Result [ExceptionValue ex] ⇒ Result [ExceptionValue ex]
+      | result ⇒ result)" |
+
+"erlang_eval (SingleExp (PrimOpCallExpr prim_op  exprs) _) env closures =
+     (let vals = map (λe. erlang_eval e env closures) exprs;
+          pri_op = if prim_op = add_atom then AddOp else 
+            if prim_op = sub_atom then SubOp else
+             if prim_op = mul_atom then MulOp else
+             if prim_op = div_atom then DivOp else
+             if prim_op = equal_atom then EqualOp else undefined in
+      if list_all is_value_result vals then
+        case eval_prim_op pri_op (map get_value_from_result vals) of
+           Some(AtomicValue atom)  ⇒  Result [AtomicValue atom]
+        | Some(ExceptionValue ex) ⇒  Result [ExceptionValue ex]
+        | None ⇒ (UndefinedBehaviour (Some env) (Some closures) )
+      else handle_exceptions_or_undefined vals)" |
+
+  "erlang_eval (SingleExp (LetRecExpr defs expr) _) env closures =
+     (let
+        func_names = map extract_function_name defs;
+        func_closures = map (λdef. create_closure (map extract_var_name (get_fun_params def)) (extract_def_body def) env) defs;
+        extended_env = foldl (λacc (name, closure). (FuncName name, EnvClosure closure) # acc) (get_env_list env) (zip func_names func_closures);
+        updated_closures = foldl (λacc name. (FuncName name,(Env extended_env)) # acc) closures func_names
+      in
+        erlang_eval expr (Env extended_env) updated_closures)" |
+
+
+  "erlang_eval (SingleExp (InterModuleCallExpr module_expr func_expr args) _) env closures = undefined" |
+
+  "erlang_eval (SingleExp (ReceiveExpr _ _ _) _) env closures = undefined" |
+
+  "erlang_eval (SingleExp (SequencingExpr _ _) _) env closures = undefined"
+
   sorry
 termination erlang_eval
   sorry
 
 
 
-(**)
+
+
+
+subsection  \<open>Simple Expressions\<close>
+
+(* Example of atoms *)
+definition atom_example_1 :: atom where
+"atom_example_1 = Atom [InputChar CHR ''a'', InputChar CHR ''t'', InputChar CHR ''o'', InputChar CHR ''m'']"
+
+definition atom_example_2 :: atom where
+"atom_example_2 = Atom [InputChar CHR ''e'', InputChar CHR ''r'', InputChar CHR ''l'', InputChar CHR ''a'', InputChar CHR ''n'', InputChar CHR ''g'']"
+
+definition atomic_exp_example_1 :: expression where
+"atomic_exp_example_1 = SingleExp (AtomicLitExpr (AtomLiteral atom_example_1)) None"
+
+definition atomic_exp_example_2 :: expression where
+"atomic_exp_example_2 = SingleExp (AtomicLitExpr (AtomLiteral atom_example_2)) None"
+
+
+(* Example of integers *)
+definition int_example_1 :: integer where
+"int_example_1 = Integer (Some Plus) (Nonemptylist One [Zero])"  (* 10 *)
+
+definition int_example_2 :: integer where
+"int_example_2 = Integer (Some Minus) (Nonemptylist Five [Three])"  (* -53 *)
+
+definition int_example_3 :: integer where
+"int_example_3 = Integer (Some Plus) (Nonemptylist Three [])"  (* 3 *)
+
+definition int_example_4 :: integer where
+"int_example_4 = Integer (Some Plus) (Nonemptylist Four [])"  (* 4 *)
+
+definition int_exp_example_1 :: "expression" where
+  "int_exp_example_1 = SingleExp (AtomicLitExpr (IntegerLiteral int_example_1)) None"
+
+definition int_exp_example_2 :: "expression" where
+  "int_exp_example_2 = SingleExp (AtomicLitExpr (IntegerLiteral int_example_2)) None"
+
+definition int_exp_example_3 :: "expression" where
+  "int_exp_example_3 = SingleExp (AtomicLitExpr (IntegerLiteral int_example_3)) None"
+
+definition int_exp_example_4 :: "expression" where
+  "int_exp_example_4 = SingleExp (AtomicLitExpr (IntegerLiteral int_example_4)) None"
+
+
+(* Example of variables *)
+definition var_example_1 :: variable_name where
+"var_example_1 = UpperCharVar A [Lowercase v, Lowercase a, Lowercase r]"
+
+definition var_example_2 :: variable_name where
+"var_example_2 = UnderscoreVar (Nonemptylist Underscore [Digit Zero])"
+
+definition var_exp_example_1 :: "expression" where
+  "var_exp_example_1 = SingleExp (VarNameExpr var_example_1 ) None"
+
+definition var_exp_example_2 :: "expression" where
+  "var_exp_example_2 = SingleExp (VarNameExpr var_example_2 ) None"
+
+
+
+(* Add function: add(x, y) -> x + y *)
+definition add_fun :: func where
+"add_fun = Func [AnnotatedVarName var_example_1, AnnotatedVarName var_example_2]
+                (SingleExp (PrimOpCallExpr add_atom [var_exp_example_1, var_exp_example_2]) None)"
+
+abbreviation two :: integer where
+  "two ≡ Integer None (Nonemptylist Two [])"
+
+(* Define the function name for the add function *)
+definition add_function_name :: function_name where
+  "add_function_name ≡ FunctionName add_atom two"
+
+(* Define the function definition for the add function *)
+definition add_fun_def :: function_definition where
+  "add_fun_def ≡ FunctionDefinition (AnnotatedFunctionName add_function_name None) 
+                                     (AnnotatedFun add_fun None)"
+
+(* Define the module that contains the add function *)
+definition add_module :: module where
+  "add_module ≡ Module add_atom 
+                       (ModuleHeader [Export add_function_name] []) 
+                       (ModuleBody [add_fun_def]) 
+                       End"
+
+(* Define the environment that includes the add function *)
+definition add_env :: env where
+  "add_env ≡ Env[(FuncName add_function_name,(EnvClosure (Closure 
+                                                [var_example_1, var_example_2] 
+                                                (SingleExp (PrimOpCallExpr  add_atom [var_exp_example_1, var_exp_example_2]) None) 
+                                                (Env []))))]"
+
+
+(* Define the test expression to add 3 and 5 using the add function *)
+definition test_add_expr :: expression where
+  "test_add_expr ≡ SingleExp 
+                    (AppExpr 
+                      (SingleExp (FuncNameExpr add_function_name) None) 
+                      [(SingleExp (AtomicLitExpr (IntegerLiteral (nat_to_integer 3))) None), 
+                       (SingleExp (AtomicLitExpr (IntegerLiteral (nat_to_integer 5))) None)]) 
+                    None"
+
+(* Evaluate the test expression *)
+definition add_result :: result where
+  "add_result ≡ erlang_eval test_add_expr add_env []"
+
+value "add_result"
+
+
+(* Define factorial function using Core Erlang syntax *)
+abbreviation factorial_atom :: atom where
+  "factorial_atom ≡ Atom [InputChar (CHR ''f''), InputChar (CHR ''a''), InputChar (CHR ''c''), InputChar (CHR ''t''), InputChar (CHR ''o''), InputChar (CHR ''r''), InputChar (CHR ''i''), InputChar (CHR ''a''), InputChar (CHR ''l'')]"
+
+abbreviation main_atom :: atom where
+  "main_atom ≡ Atom [InputChar (CHR ''m''), InputChar (CHR ''a''), InputChar (CHR ''i''), InputChar (CHR ''n'')]"
+
+abbreviation zero_atom :: atom where
+  "zero_atom ≡ Atom [InputChar (CHR ''z''), InputChar (CHR ''e''), InputChar (CHR ''r''), InputChar (CHR ''o'')]"
+
+abbreviation one_atom :: atom where
+  "one_atom ≡ Atom [InputChar (CHR ''o''), InputChar (CHR ''n''), InputChar (CHR ''e'')]"
+
+abbreviation list_var :: variable_name where
+  "list_var ≡ UpperCharVar L []"
+
+
+abbreviation x_var :: variable_name where
+  "x_var ≡ UpperCharVar X []"
+
+abbreviation y_var :: variable_name where
+  "y_var ≡ UpperCharVar Y []"
+
+abbreviation fact_var :: variable_name where
+  "fact_var ≡ UpperCharVar A []"
+
+definition empty_env :: env where
+  "empty_env ≡ Env []"
+
+definition env_fact :: env where
+"env_fact = Env [(VarName x_var, EnvValue (AtomicValue (IntegerLiteral int_example_3)))]"
+
+
+
+
+(* Define the factorial function using letrec *)
+definition factorial_letrec_def :: function_definition where
+  "factorial_letrec_def ≡ 
+       FunctionDefinition
+         (AnnotatedFunctionName (FunctionName factorial_atom one) None)
+         (AnnotatedFun
+           (Func
+             [AnnotatedVarName x_var]
+             (SingleExp
+               (CaseExpr
+                 (ErlangCase
+                   (SingleExp (VarNameExpr x_var) None)
+                   [Clause
+                     (Pattern (AnnotatedPatern (AtomicLitPat (IntegerLiteral (Integer None (Nonemptylist Zero []))))))
+                     (When (SingleExp (AtomicLitExpr (AtomLiteral true)) None))
+                     (SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist One [])))) None)
+                     [],
+                    Clause
+                     (Pattern (AnnotatedVarPattern (AnnotatedVarName x_var)))
+                     (When (SingleExp (AtomicLitExpr (AtomLiteral true)) None))
+                     (SingleExp
+                       (PrimOpCallExpr mul_atom
+                         [(SingleExp (VarNameExpr x_var) None),
+                          (SingleExp
+                            (AppExpr
+                              (SingleExp (FuncNameExpr (FunctionName factorial_atom one)) None)
+                              [(SingleExp
+                                 (PrimOpCallExpr sub_atom
+                                   [(SingleExp (VarNameExpr x_var) None),
+                                    (SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist (nat_to_digit 1) [])))) None)])
+                                None)])
+                            None)])
+                       None)
+                     []]))
+               None))
+           None)"
+
+(* Define the function name for the factorial function *)
+definition factorial_function_name :: function_name where
+  "factorial_function_name ≡ FunctionName factorial_atom one"
+
+(* Define the test expression to calculate factorial of 5 using the letrec expression *)
+definition test_factorial_letrec_expr :: expression where
+  "test_factorial_letrec_expr ≡ SingleExp
+    (LetRecExpr
+       [FunctionDefinition
+         (AnnotatedFunctionName (FunctionName factorial_atom one) None)
+         (AnnotatedFun
+           (Func
+             [AnnotatedVarName x_var]
+             (SingleExp
+               (CaseExpr
+                 (ErlangCase
+                   (SingleExp (VarNameExpr x_var) None)
+                   [Clause
+                     (Pattern (AnnotatedPatern (AtomicLitPat (IntegerLiteral (Integer None (Nonemptylist Zero []))))))
+                     (When (SingleExp (AtomicLitExpr (AtomLiteral true)) None))
+                     (SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist One [])))) None)
+                     [],
+                    Clause
+                     (Pattern (AnnotatedVarPattern (AnnotatedVarName x_var)))
+                     (When (SingleExp (AtomicLitExpr (AtomLiteral true)) None))
+                     (SingleExp
+                       (PrimOpCallExpr mul_atom
+                         [(SingleExp (VarNameExpr x_var) None),
+                          (SingleExp
+                            (AppExpr
+                              (SingleExp (FuncNameExpr (FunctionName factorial_atom one)) None)
+                              [(SingleExp
+                                 (PrimOpCallExpr sub_atom
+                                   [(SingleExp (VarNameExpr x_var) None),
+                                    (SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist (nat_to_digit 1) [])))) None)])
+                                None)])
+                            None)])
+                       None)
+                     []]))
+               None))
+           None)]
+       (SingleExp
+         (AppExpr
+           (SingleExp (FuncNameExpr (FunctionName factorial_atom one)) None)
+           [(SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist (nat_to_digit 6) [])))) None)])
+         None))
+     None"
+
+
+
+(* Evaluate the test expression *)
+definition factorial_result_letrec :: result where
+  "factorial_result_letrec ≡ erlang_eval test_factorial_letrec_expr empty_env []"
+
+value "factorial_result_letrec"
+
+value " erlang_eval (SingleExp
+                (PrimOpCallExpr mul_atom
+                  [(SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist (nat_to_digit 6) [])))) None),
+                   (SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist One [Two, Zero])))) None)])
+                None) empty_env []"
+
+value " int (nonemptylist_to_nat (Nonemptylist One [Two, Zero]))"
+value "let
+  func_names = map extract_function_name [factorial_letrec_def];
+  func_closures = map (λdef. create_closure (map extract_var_name (get_fun_params def)) (extract_def_body def) empty_env) [factorial_letrec_def]
+in (func_names, func_closures)"
+
+value "let
+  func_names = map extract_function_name [factorial_letrec_def];
+  func_closures = map (λdef. create_closure (map extract_var_name (get_fun_params def)) (extract_def_body def) empty_env) [factorial_letrec_def];
+  extended_env = foldl (λacc (name, closure). (FuncName name, EnvClosure closure) # acc) ( get_env_list empty_env) (zip func_names func_closures)
+in extended_env"
+
+
+
+(*Let Expression*)
+(* Let expression: let x = 10 in x + 10 *)
+definition let_expr :: expression where
+"let_expr = SingleExp (LetExpr (ErlangLet (Variable (AnnotatedVarName var_example_1)) int_exp_example_1
+                            (SingleExp (PrimOpCallExpr add_atom
+                                        [ var_exp_example_1, int_exp_example_1 ]) None))) None"
+
+definition let_add_example :: expression where
+  "let_add_example ≡ SingleExp 
+     (LetExpr 
+       (ErlangLet 
+         (VariablesList [AnnotatedVarName x_var, AnnotatedVarName y_var]) 
+         (ValueListExp (ValueList 
+           [AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist Three []))) , 
+            AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist Four []))) ] 
+           None) None) 
+         (SingleExp 
+           (AppExpr 
+             (SingleExp (FuncNameExpr (FunctionName add_atom (Integer None (Nonemptylist Two [])))) None) 
+             [SingleExp (VarNameExpr x_var) None, 
+              SingleExp (VarNameExpr y_var) None]) 
+           None))) 
+     None"
+
+value "erlang_eval let_expr empty_env []"
+
+value "let
+  func_names = map extract_function_name [add_fun_def];
+  func_closures = map (λdef. create_closure (map extract_var_name (get_fun_params def)) (extract_def_body def) empty_env) [add_fun_def];
+  extended_env = foldl (λacc (name, closure). (FuncName name, EnvClosure closure) # acc) ( get_env_list empty_env) (zip func_names func_closures);
+  updated_closures = foldl (λacc name. (FuncName name,(Env extended_env)) # acc) [] func_names
+in erlang_eval let_add_example (Env extended_env) updated_closures"
+
+(*List Operations*)
+
+fun list_var_to_erlang :: "variable_name ⇒env ⇒ erlang_value list" where
+  "list_var_to_erlang list_var env = 
+    (case lookup_env env (VarName list_var) of 
+       Some (EnvValue (ListValue vals)) ⇒ vals 
+     | _ ⇒ [])" | 
+  "list_var_to_erlang _ _  = undefined"
+
+definition append_fun :: func where
+  "append_fun ≡ Func 
+     [AnnotatedVarName list_var, AnnotatedVarName x_var] 
+     (SingleExp 
+       (LetExpr 
+         (ErlangLet 
+           (Variable (AnnotatedVarName list_var)) 
+           (SingleExp (VarNameExpr list_var) None)
+           (SingleExp 
+             (LetExpr 
+               (ErlangLet 
+                 (Variable (AnnotatedVarName x_var)) 
+                 (SingleExp (VarNameExpr x_var) None)
+                 (SingleExp 
+                   (CaseExpr 
+                     (ErlangCase 
+                       (SingleExp (VarNameExpr list_var) None)
+                       [Clause
+                         (Pattern (AnnotatedPatern (ListPat [AnnotatedVarPattern (AnnotatedVarName list_var)])))
+                         (When (SingleExp (AtomicLitExpr (AtomLiteral true)) None))
+                         (SingleExp
+                           (ListExpr
+                             (ListWithTail
+                               (Nonemptylist
+                                 (SingleExp (VarNameExpr list_var) None)
+                                 [(SingleExp (VarNameExpr x_var) None)])
+                               (SingleExp (AtomicLitExpr (NilLiteral (ErlangNil))) None))
+                           )
+                        None) []]))
+                 None)))
+      None ))) None)"
+(*
+(* Updated Append Function *)
+definition append_fun :: func where
+  "append_fun ≡ Func 
+     [AnnotatedVarName list_var, AnnotatedVarName x_var] 
+     (SingleExp 
+       (LetExpr 
+         (ErlangLet 
+           (VariablesList [AnnotatedVarName list_var, AnnotatedVarName x_var]) 
+           (ValueListExp (ValueList 
+             [ (VarNameExpr list_var) , 
+               (VarNameExpr x_var) ] None) None) 
+           (SingleExp 
+             (CaseExpr 
+               (ErlangCase 
+                 (SingleExp (VarNameExpr list_var) None) 
+                 [Clause 
+                   (Pattern (AnnotatedVarPattern (AnnotatedVarName list_var))) 
+                   (When (SingleExp (AtomicLitExpr (AtomLiteral true)) None)) 
+                   (SingleExp 
+                     (ListExpr 
+                       (ListWithTail 
+                         (Nonemptylist 
+                           (SingleExp (VarNameExpr x_var) None) 
+                           [SingleExp (VarNameExpr list_var) None]) 
+                         (SingleExp (AtomicLitExpr (NilLiteral (ErlangNil))) None)) 
+                     ) None) 
+                   []])) 
+             None)) 
+       ) None)"
+*)
+
+
+(* Define the function name for the append function *)
+definition append_function_name :: function_name where
+  "append_function_name ≡ FunctionName (Atom [InputChar CHR ''a'']) (Integer None (Nonemptylist Two []))"
+
+definition append_fun_def :: function_definition where
+  "append_fun_def ≡ FunctionDefinition (AnnotatedFunctionName append_function_name None) 
+                                       (AnnotatedFun append_fun None)"
+
+definition append_env :: env where
+  "append_env ≡ Env [(FuncName append_function_name, 
+                       EnvClosure (Closure 
+                                    [list_var, x_var] 
+                                    (SingleExp 
+       (LetExpr 
+         (ErlangLet 
+           (Variable (AnnotatedVarName list_var)) 
+           (SingleExp (VarNameExpr list_var) None)
+           (SingleExp 
+             (LetExpr 
+               (ErlangLet 
+                 (Variable (AnnotatedVarName x_var)) 
+                 (SingleExp (VarNameExpr x_var) None)
+                 (SingleExp 
+                   (CaseExpr 
+                     (ErlangCase 
+                       (SingleExp (VarNameExpr list_var) None)
+                       [Clause
+                         (Pattern (AnnotatedPatern (ListPat [AnnotatedVarPattern (AnnotatedVarName list_var)])))
+                         (When (SingleExp (AtomicLitExpr (AtomLiteral true)) None))
+                         (SingleExp
+                           (ListExpr
+                             (ListWithTail
+                               (Nonemptylist
+                                 (SingleExp (VarNameExpr list_var) None)
+                                 [(SingleExp (VarNameExpr x_var) None)])
+                               (SingleExp (AtomicLitExpr (NilLiteral (ErlangNil))) None))
+                           )
+                        None) []]))
+                 None)))
+      None ))) None) (Env [])))]"
+
+(* Test Cases for Append Function *)
+definition list_example_1 :: expression where
+  "list_example_1 ≡ SingleExp 
+                     (ListExpr 
+                       (List 
+                         (Nonemptylist 
+                           (SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist One [])))) None) 
+                           [SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist Two [])))) None])) 
+                     )None"
+
+definition list_example_2 :: expression where
+  "list_example_2 ≡ SingleExp 
+                     (ListExpr 
+                       (List 
+                         (Nonemptylist 
+                           (SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist Three [])))) None) 
+                           [SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist Four [])))) None])) 
+                     )None"
+
+definition element_example :: expression where
+  "element_example ≡ SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist Five [])))) None"
+
+definition test_append_expr :: expression where
+  "test_append_expr ≡ SingleExp 
+                        (AppExpr 
+                          (SingleExp (FuncNameExpr append_function_name) None) 
+                          [list_example_1, element_example]) 
+                        None"
+
+(* Evaluate the test expression *)
+definition append_result :: result where
+  "append_result ≡ erlang_eval test_append_expr append_env []"
+
+value "append_result"
+
+(* Test Cases for Append Function *)
+definition list_example_1 :: expression where
+  "list_example_1 ≡ SingleExp 
+                     (ListExpr 
+                       (List 
+                         (Nonemptylist 
+                           (SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist One [])))) None) 
+                           [SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist Two [])))) None])) 
+                     )None"
+
+definition list_example_2 :: expression where
+  "list_example_2 ≡ SingleExp 
+                     (ListExpr 
+                       (List 
+                         (Nonemptylist 
+                           (SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist Three [])))) None) 
+                           [SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist Four [])))) None])) 
+                     )None"
+
+definition element_example :: expression where
+  "element_example ≡ SingleExp (AtomicLitExpr (IntegerLiteral (Integer None (Nonemptylist Five [])))) None"
+
+definition test_append_expr :: expression where
+  "test_append_expr ≡ SingleExp 
+                        (AppExpr 
+                          (SingleExp (FuncNameExpr (FunctionName (Atom [InputChar CHR ''a'']) (Integer None (Nonemptylist Two [])))) None) 
+                          [list_example_1, element_example]) 
+                        None"
+
+(* Define the environment that includes the append function *)
+definition append_function_name :: function_name where
+  "append_function_name ≡ FunctionName (Atom [InputChar CHR ''a'']) (Integer None (Nonemptylist Two []))"
+
+definition append_fun_def :: function_definition where
+  "append_fun_def ≡ FunctionDefinition (AnnotatedFunctionName append_function_name None) 
+                                       (AnnotatedFun append_fun None)"
+
+definition append_env :: env where
+  "append_env ≡ Env [(FuncName append_function_name, 
+                       EnvClosure (Closure 
+                                    [list_var, x_var] 
+                                    (SingleExp 
+                                      (CaseExpr 
+                                        (ErlangCase 
+                                          (SingleExp (VarNameExpr list_var) None) 
+                                          [Clause 
+                                            (Pattern (AnnotatedPatern (ListPat [AnnotatedVarPattern (AnnotatedVarName list_var)]))) 
+                                            (When (SingleExp (AtomicLitExpr (AtomLiteral true)) None)) 
+                                            (SingleExp 
+                                              (ListExpr 
+                                                (ListWithTail 
+                                                  (Nonemptylist 
+                                                    (SingleExp (VarNameExpr x_var) None) 
+                                                    [SingleExp (VarNameExpr list_var) None]) 
+                                                  (SingleExp (AtomicLitExpr (NilLiteral (ErlangNil))) None)) 
+                                              ) None) 
+                                            []])) 
+                                    None) 
+                                    empty_env))]"
+
+
+(* Evaluate the test expression *)
+definition append_result :: result where
+  "append_result ≡ erlang_eval test_append_expr append_env []"
+
+value "append_result"
+
+
+definition reverse_fun :: func where
+  "reverse_fun ≡ Func 
+     [AnnotatedVarName x_var] 
+     (SingleExp 
+       (CaseExpr 
+         (ErlangCase 
+           (SingleExp (VarNameExpr x_var) None) 
+           [Clause 
+             (Pattern (AnnotatedPatern (ListPat []))) 
+             (When (SingleExp (AtomicLitExpr (AtomLiteral zero_atom)) None)) 
+             (SingleExp (AtomicLitExpr (NilLiteral (ErlangNil))) None) 
+             [], 
+            Clause 
+              (Pattern (AnnotatedPatern (ListPat [AnnotatedVarPattern (AnnotatedVarName fact_var)]))) 
+              (When (SingleExp (AtomicLitExpr (AtomLiteral zero_atom)) None)) 
+              (SingleExp 
+                (AppExpr 
+                  (SingleExp (FuncNameExpr (FunctionName factorial_atom one)) None) 
+                  [(SingleExp (VarNameExpr fact_var) None)]) 
+                None) 
+              []])) 
+       None)"
+
+value "add_fun"
+value "integer_to_nat int_example_2 + integer_to_nat int_example_1"
+
+(*11*)
+
 
 
 end
