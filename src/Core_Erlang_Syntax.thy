@@ -412,7 +412,7 @@ function validate_expr :: "expression ⇒ scope ⇒ bool" where
   (let new_scope = foldr add_func_to_scope (map extract_function_name defs) scope in
   (∀def ∈ set defs. validate_expr (extract_def_body def) (add_vars_to_scope (map extract_var_name (extract_def_vars def)) new_scope))
    ∧ validate_expr exp new_scope)" |
-"validate_expr _ _ = True"
+"validate_expr _ _ = False"
   sorry
 termination validate_expr
   sorry
@@ -420,18 +420,18 @@ termination validate_expr
 (*To be checked: validating only function expressions. Not definitions*)
 fun validate_fun :: "expression ⇒ bool" where
 "validate_fun (SingleExp (FunExpr (Func vars _)) _) = distinct vars" |
-"validate_fun _ = True"
+"validate_fun _ = False"
 
 
 fun validate_let :: "expression ⇒ bool" where
 "validate_let (SingleExp (LetExpr (ErlangLet (VariablesList vars) _ _)) _) =  distinct vars" |
-"validate_let _ = True"
+"validate_let _ = False"
 
 
 (*To be checked: validating only TryExpr inside single expression*)
 fun validate_try :: "expression ⇒ bool" where
 "validate_try (SingleExp (TryExpr  _ (VariablesList vars1) _ (VariablesList vars2) _) _ ) =  ((distinct vars1) ∨ (distinct vars2))" |
-"validate_try _ = True"
+"validate_try _ = False"
 
 
 fun get_patterns_list :: "annotated_clause  ⇒ annotated_pattern list" where 
@@ -440,12 +440,12 @@ fun get_patterns_list :: "annotated_clause  ⇒ annotated_pattern list" where
 
 fun validate_case :: "expression ⇒ bool" where
 "validate_case (SingleExp (CaseExpr (ErlangCase _ clauses)) _) =   (∀c1 ∈ set clauses. ∀c2 ∈ set clauses. length (get_patterns_list c1) = length (get_patterns_list c2))" |
-"validate_case _ = True"
+"validate_case _ = False"
 
 (*To be checked: validating only receive inside single expression*)
 fun validate_receive :: "expression ⇒ bool" where
 "validate_receive (SingleExp (ReceiveExpr clauses _ _) _) = (∀c ∈ set clauses. length (get_patterns_list c) = 1)" |
-"validate_receive _ = True"
+"validate_receive _ = False"
 
 
 fun get_function_names :: "function_definition list ⇒ annotated_function_name list" where
@@ -454,7 +454,7 @@ fun get_function_names :: "function_definition list ⇒ annotated_function_name 
 
 fun validate_letrec :: "expression ⇒ bool" where
 "validate_letrec (SingleExp(LetRecExpr defs _) None) = distinct (get_function_names defs)" |
-"validate_letrec _ = True"
+"validate_letrec _ = False"
 
 (*Clause and Patterns*)
 fun extract_vars_from_annotated_pattern :: "annotated_pattern ⇒ variable_name list" where
